@@ -1036,4 +1036,294 @@ router.post("/check-user-limit", async (req, res) => {
     }
 });
 
+// ============================================
+// GESTION DES DEMANDES DE RÉINITIALISATION DE MOT DE PASSE
+// ============================================
+
+// Fonction helper pour lire les demandes de réinitialisation
+const lireDemandesReset = () => {
+    const demandesPath = path.join(__dirname, '../data/demandes-reset-password.json');
+    const dataDir = path.join(__dirname, '../data');
+    
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    if (!fs.existsSync(demandesPath)) {
+        return [];
+    }
+    
+    try {
+        const fileContent = fs.readFileSync(demandesPath, 'utf8');
+        return JSON.parse(fileContent);
+    } catch (err) {
+        console.error('Erreur lecture demandes reset:', err);
+        return [];
+    }
+};
+
+// Fonction helper pour sauvegarder les demandes de réinitialisation
+const sauvegarderDemandesReset = (demandes) => {
+    const demandesPath = path.join(__dirname, '../data/demandes-reset-password.json');
+    try {
+        fs.writeFileSync(demandesPath, JSON.stringify(demandes, null, 2), 'utf8');
+        return true;
+    } catch (err) {
+        console.error('Erreur sauvegarde demandes reset:', err);
+        return false;
+    }
+};
+
+// POST - Créer une demande de réinitialisation de mot de passe (pour non-admin)
+router.post("/reset-password/request-demand", async (req, res) => {
+    try {
+        const { matricule, poste } = req.body;
+        
+        if (!matricule || !poste) {
+            return res.status(400).json({
+                message: "Veuillez fournir le matricule et le poste",
+                status: 400
+            });
+        }
+
+        // Vérifier que ce n'est pas un admin (les admins ne doivent pas utiliser cet endpoint)
+        if (poste.toLowerCase() === 'administrateur') {
+            return res.status(400).json({
+                message: "Les administrateurs doivent utiliser la réinitialisation directe",
+                status: 400
+            });
+        }
+
+        // Vérifier si l'utilisateur existe
+        const user = await UserModel.findOne({
+            where: {
+                matricule: matricule,
+                poste: poste.toLowerCase()
+            },
+            attributes: ['matricule', 'nom', 'email', 'contact', 'poste']
+        });
+
+        if (!user) {
+            // Ne pas révéler si l'utilisateur existe ou non pour la sécurité
+            return res.status(200).json({
+                message: "Si ce compte existe, une demande de réinitialisation sera créée",
+                status: 200
+            });
+        }
+
+        // Lire les demandes existantes
+        const demandes = lireDemandesReset();
+        
+        // Vérifier si une demande existe déjà pour ce matricule et poste
+        const demandeExistante = demandes.find(d => 
+            d.matricule === matricule && 
+            d.poste.toLowerCase() === poste.toLowerCase() && 
+            d.statut === 'en_attente'
+        );
+        
+        if (demandeExistante) {
+            return res.status(200).json({
+                message: "Une demande de réinitialisation est déjà en attente pour ce compte",
+                status: 200,
+                demandeExistante: true
+            });
+        }
+        
+        // Créer une nouvelle demande
+        const nouvelleDemande = {
+            id: Date.now().toString(),
+            matricule: matricule,
+            poste: poste.toLowerCase(),
+            nom: user.nom,
+            email: user.email,
+            contact: user.contact,
+            statut: 'en_attente',
+            dateCreation: new Date().toISOString(),
+            dateApprobation: null,
+            dateRejet: null,
+            approuvePar: null,
+            rejetePar: null
+        };
+        
+        demandes.push(nouvelleDemande);
+        sauvegarderDemandesReset(demandes);
+        
+        console.log('✅ Demande de réinitialisation créée:', nouvelleDemande.id);
+        
+        return res.status(200).json({
+            message: "Demande de réinitialisation créée avec succès. L'administrateur sera notifié.",
+            status: 200,
+            data: {
+                id: nouvelleDemande.id,
+                matricule: nouvelleDemande.matricule,
+                poste: nouvelleDemande.poste
+            }
+        });
+        
+    } catch (err) {
+        console.error('❌ Erreur création demande reset:', err);
+        return res.status(500).json({
+            message: "Erreur serveur",
+            status: 500,
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+});
+
+// GET - Obtenir toutes les demandes de réinitialisation (admin seulement)
+router.get("/reset-password/demandes", async (req, res) => {
+    try {
+        const demandes = lireDemandesReset();
+        
+        return res.status(200).json({
+            message: "Demandes de réinitialisation récupérées avec succès",
+            status: 200,
+            data: demandes
+        });
+    } catch (err) {
+        console.error('❌ Erreur récupération demandes reset:', err);
+        return res.status(500).json({
+            message: "Erreur serveur",
+            status: 500,
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+});
+
+// PUT - Approuver ou rejeter une demande de réinitialisation (admin seulement)
+router.put("/reset-password/demandes/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { action, newPassword } = req.body;
+        
+        if (!action || (action !== 'approuver' && action !== 'rejeter')) {
+            return res.status(400).json({
+                message: "Action invalide. Utilisez 'approuver' ou 'rejeter'",
+                status: 400
+            });
+        }
+        
+        const demandes = lireDemandesReset();
+        const demandeIndex = demandes.findIndex(d => d.id === id);
+        
+        if (demandeIndex === -1) {
+            return res.status(404).json({
+                message: "Demande non trouvée",
+                status: 404
+            });
+        }
+        
+        const demande = demandes[demandeIndex];
+        
+        if (demande.statut !== 'en_attente') {
+            return res.status(400).json({
+                message: "Cette demande a déjà été traitée",
+                status: 400
+            });
+        }
+        
+        // Récupérer les infos de l'admin depuis le token
+        const authHeader = req.headers["authorization"];
+        let adminMatricule = 'ADMIN';
+        let adminNom = 'Administrateur';
+        
+        if (authHeader) {
+            const token = authHeader.split(' ')[1];
+            if (token) {
+                try {
+                    const decoded = webToken.verify(token, SECRET_KEY);
+                    adminMatricule = decoded.matricule || 'ADMIN';
+                    adminNom = decoded.nom || 'Administrateur';
+                } catch (err) {
+                    console.error('Erreur décodage token:', err);
+                }
+            }
+        }
+        
+        if (action === 'approuver') {
+            // Validation du nouveau mot de passe
+            if (!newPassword || newPassword.length < 6) {
+                return res.status(400).json({
+                    message: "Le nouveau mot de passe doit contenir au moins 6 caractères",
+                    status: 400
+                });
+            }
+            
+            // Vérifier si l'utilisateur existe toujours
+            const user = await UserModel.findOne({
+                where: {
+                    matricule: demande.matricule,
+                    poste: demande.poste
+                }
+            });
+            
+            if (!user) {
+                return res.status(404).json({
+                    message: "Utilisateur non trouvé",
+                    status: 404
+                });
+            }
+            
+            // Hasher le nouveau mot de passe
+            const salt = await bcrypt.genSalt(10);
+            const hash = await bcrypt.hash(newPassword, salt);
+            
+            // Mettre à jour le mot de passe
+            await user.update({ mdp: hash });
+            
+            // Mettre à jour la demande
+            demande.statut = 'approuvee';
+            demande.dateApprobation = new Date().toISOString();
+            demande.approuvePar = adminMatricule;
+            
+            demandes[demandeIndex] = demande;
+            sauvegarderDemandesReset(demandes);
+            
+            console.log('✅ Demande de réinitialisation approuvée:', demande.id);
+            
+            return res.status(200).json({
+                message: "Demande approuvée et mot de passe réinitialisé avec succès",
+                status: 200,
+                data: {
+                    id: demande.id,
+                    matricule: demande.matricule,
+                    poste: demande.poste,
+                    statut: demande.statut,
+                    dateApprobation: demande.dateApprobation
+                }
+            });
+        } else if (action === 'rejeter') {
+            // Mettre à jour la demande
+            demande.statut = 'rejetee';
+            demande.dateRejet = new Date().toISOString();
+            demande.rejetePar = adminMatricule;
+            
+            demandes[demandeIndex] = demande;
+            sauvegarderDemandesReset(demandes);
+            
+            console.log('❌ Demande de réinitialisation rejetée:', demande.id);
+            
+            return res.status(200).json({
+                message: "Demande rejetée",
+                status: 200,
+                data: {
+                    id: demande.id,
+                    matricule: demande.matricule,
+                    poste: demande.poste,
+                    statut: demande.statut,
+                    dateRejet: demande.dateRejet
+                }
+            });
+        }
+        
+    } catch (err) {
+        console.error('❌ Erreur traitement demande reset:', err);
+        return res.status(500).json({
+            message: "Erreur serveur",
+            status: 500,
+            error: process.env.NODE_ENV === 'development' ? err.message : undefined
+        });
+    }
+});
+
 module.exports = router

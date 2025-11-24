@@ -439,27 +439,67 @@ export default function AuthForm() {
                 setResetLoading(true);
                 setResetMessage({ type: '', text: '' });
                 
+                // Vérifier si c'est un admin (peut réinitialiser directement) ou un autre utilisateur (doit faire une demande)
+                const isAdmin = resetData.poste.toLowerCase() === 'administrateur';
+                
                 try {
-                  const response = await fetch('http://localhost:3000/api/user/reset-password/request', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      matricule: resetData.matricule,
-                      poste: resetData.poste,
-                      email: resetData.email
-                    })
-                  });
-                  
-                  const data = await response.json();
-                  
-                  if (response.ok) {
-                    setResetMessage({ 
-                      type: 'success', 
-                      text: data.code ? `Code généré: ${data.code} (valable 15 minutes)` : 'Code envoyé par email' 
+                  if (isAdmin) {
+                    // Admin : réinitialisation directe
+                    const response = await fetch('http://localhost:3000/api/user/reset-password/request', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        matricule: resetData.matricule,
+                        poste: resetData.poste,
+                        email: resetData.email
+                      })
                     });
-                    setResetStep(2);
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                      setResetMessage({ 
+                        type: 'success', 
+                        text: data.code ? `Code généré: ${data.code} (valable 15 minutes)` : 'Code envoyé par email' 
+                      });
+                      setResetStep(2);
+                    } else {
+                      setResetMessage({ type: 'danger', text: data.message || 'Erreur lors de la génération du code' });
+                    }
                   } else {
-                    setResetMessage({ type: 'danger', text: data.message || 'Erreur lors de la génération du code' });
+                    // Autres utilisateurs : créer une demande
+                    const response = await fetch('http://localhost:3000/api/user/reset-password/request-demand', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        matricule: resetData.matricule,
+                        poste: resetData.poste
+                      })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                      setResetMessage({ 
+                        type: 'success', 
+                        text: 'Votre demande de réinitialisation de mot de passe a été envoyée à l\'administrateur. Vous recevrez une notification une fois approuvée.' 
+                      });
+                      setTimeout(() => {
+                        setShowResetModal(false);
+                        setResetStep(1);
+                        setResetData({
+                          matricule: '',
+                          poste: '',
+                          email: '',
+                          code: '',
+                          newPassword: '',
+                          confirmPassword: '',
+                          recoveryKey: ''
+                        });
+                      }, 3000);
+                    } else {
+                      setResetMessage({ type: 'danger', text: data.message || 'Erreur lors de la création de la demande' });
+                    }
                   }
                 } catch (err) {
                   setResetMessage({ type: 'danger', text: 'Erreur serveur ou réseau' });
@@ -502,21 +542,49 @@ export default function AuthForm() {
                   </select>
                 </div>
                 {resetData.poste === 'administrateur' && (
-                  <div className="input-group">
-                    <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                    </svg>
-                    <input
-                      type="text"
-                      placeholder="Clé de récupération (optionnel)"
-                      className="input-field"
-                      value={resetData.recoveryKey}
-                      onChange={e => setResetData({...resetData, recoveryKey: e.target.value})}
-                    />
-                    <small style={{ color: '#999', fontSize: '0.75rem', marginTop: '0.5rem', display: 'block', opacity: 0.7 }}>
-                      Clé d'urgence pour admin (voir .env ADMIN_RECOVERY_KEY)
-                    </small>
+                  <>
+                    <div className="input-group">
+                      <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                        <path d="M3 7l9 6 9-6"></path>
+                      </svg>
+                      <input
+                        type="email"
+                        placeholder="Email"
+                        className="input-field"
+                        value={resetData.email}
+                        onChange={e => setResetData({...resetData, email: e.target.value})}
+                      />
+                    </div>
+                    <div className="input-group">
+                      <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                      </svg>
+                      <input
+                        type="text"
+                        placeholder="Clé de récupération (optionnel)"
+                        className="input-field"
+                        value={resetData.recoveryKey}
+                        onChange={e => setResetData({...resetData, recoveryKey: e.target.value})}
+                      />
+                      <small style={{ color: '#999', fontSize: '0.75rem', marginTop: '0.5rem', display: 'block', opacity: 0.7 }}>
+                        Clé d'urgence pour admin (voir .env ADMIN_RECOVERY_KEY)
+                      </small>
+                    </div>
+                  </>
+                )}
+                {resetData.poste && resetData.poste.toLowerCase() !== 'administrateur' && (
+                  <div style={{ 
+                    padding: '1rem', 
+                    backgroundColor: '#fff3cd', 
+                    borderRadius: '8px', 
+                    marginBottom: '1rem',
+                    border: '1px solid #ffc107'
+                  }}>
+                    <p style={{ margin: 0, fontSize: '0.9rem', color: '#856404' }}>
+                      <strong>Note :</strong> En tant que {resetData.poste}, votre demande de réinitialisation sera envoyée à l'administrateur pour approbation.
+                    </p>
                   </div>
                 )}
                 <button className="submit-button w-100" type="submit" disabled={resetLoading}>

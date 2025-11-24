@@ -28,6 +28,11 @@ export default function AdminDashboard() {
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedDemande, setSelectedDemande] = useState(null);
   const [approveForm, setApproveForm] = useState({ nom: '', contact: '', email: '' });
+  const [demandesReset, setDemandesReset] = useState([]);
+  const [loadingDemandesReset, setLoadingDemandesReset] = useState(false);
+  const [showResetApproveModal, setShowResetApproveModal] = useState(false);
+  const [selectedResetDemande, setSelectedResetDemande] = useState(null);
+  const [resetPasswordForm, setResetPasswordForm] = useState({ newPassword: '', confirmPassword: '' });
   const [historique, setHistorique] = useState([]);
   const [loadingHistorique, setLoadingHistorique] = useState(false);
   const [filterActionType, setFilterActionType] = useState('all');
@@ -161,6 +166,7 @@ export default function AdminDashboard() {
       loadDemandesSuppression();
       loadDemandesModification();
       loadDemandesCreation();
+      loadDemandesReset();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
@@ -169,10 +175,12 @@ export default function AdminDashboard() {
   useEffect(() => {
     loadDemandesModification();
     loadDemandesCreation();
+    loadDemandesReset();
     // Recharger les demandes toutes les 30 secondes pour mettre à jour le badge
     const interval = setInterval(() => {
       loadDemandesModification();
       loadDemandesCreation();
+      loadDemandesReset();
     }, 30000);
     return () => clearInterval(interval);
   }, []);
@@ -1302,6 +1310,139 @@ export default function AdminDashboard() {
     }
   };
 
+  // Fonctions pour gérer les demandes de réinitialisation de mot de passe
+  const loadDemandesReset = async () => {
+    setLoadingDemandesReset(true);
+    try {
+      const token = localStorage.getItem('token');
+      const API_DEMANDES = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/user/reset-password/demandes`;
+      
+      try {
+        const response = await fetch(API_DEMANDES, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.status === 200 && result.data) {
+            setDemandesReset(result.data);
+          } else {
+            setDemandesReset([]);
+          }
+        } else {
+          setDemandesReset([]);
+        }
+      } catch (apiError) {
+        console.error('Erreur API demandes reset:', apiError);
+        setDemandesReset([]);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement des demandes de réinitialisation:', error);
+      setDemandesReset([]);
+    } finally {
+      setLoadingDemandesReset(false);
+    }
+  };
+
+  const handleApprouverDemandeReset = async () => {
+    if (!selectedResetDemande || !resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword) {
+      setMsg('Veuillez remplir tous les champs (nouveau mot de passe et confirmation)');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+    
+    if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
+      setMsg('Les mots de passe ne correspondent pas');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+    
+    if (resetPasswordForm.newPassword.length < 6) {
+      setMsg('Le mot de passe doit contenir au moins 6 caractères');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const API_DEMANDES = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/user/reset-password/demandes/${selectedResetDemande.id}`;
+      
+      const response = await fetch(API_DEMANDES, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'approuver',
+          newPassword: resetPasswordForm.newPassword
+        })
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        setMsg('Demande approuvée et mot de passe réinitialisé avec succès');
+        setShowResetApproveModal(false);
+        setSelectedResetDemande(null);
+        setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+        loadDemandesReset();
+      } else {
+        const error = await response.json();
+        setMsg(error.message || 'Erreur lors de l\'approbation');
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      setMsg('Erreur lors de l\'approbation');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMsg(''), 3000);
+    }
+  };
+
+  const handleRejeterDemandeReset = async (demande) => {
+    const confirmed = await confirm({
+      title: 'Rejeter la demande',
+      message: `Rejeter la demande de réinitialisation de mot de passe pour ${demande.nom} (${demande.matricule}) ?`,
+      type: 'warning',
+      confirmText: 'Rejeter',
+      cancelText: 'Annuler'
+    });
+    if (!confirmed) return;
+    
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const API_DEMANDES = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/user/reset-password/demandes/${demande.id}`;
+      
+      const response = await fetch(API_DEMANDES, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'rejeter' })
+      });
+      
+      if (response.ok) {
+        setMsg('Demande rejetée');
+        loadDemandesReset();
+      } else {
+        const error = await response.json();
+        setMsg(error.message || 'Erreur lors du rejet');
+      }
+    } catch (error) {
+      console.error('Erreur:', error);
+      setMsg('Erreur lors du rejet');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMsg(''), 3000);
+    }
+  };
+
   const loadUtilisateurs = async () => {
     setLoading(true);
     try {
@@ -1983,7 +2124,7 @@ export default function AdminDashboard() {
               { icon: 'fa-file-contract', label: 'Conventions', section: 'conventions', active: activeSection === 'conventions' },
               { icon: 'fa-chart-line', label: 'Vue', section: 'dashboard', active: activeSection === 'dashboard' },
               { icon: 'fa-history', label: 'Historique', section: 'historique', active: activeSection === 'historique' },
-              { icon: 'fa-exclamation-triangle', label: 'Demandes', section: 'demandes', active: activeSection === 'demandes', badge: demandesModification.filter(d => d.statut === 'en_attente').length + demandesCreation.filter(d => d.statut === 'en_attente').length },
+              { icon: 'fa-exclamation-triangle', label: 'Demandes', section: 'demandes', active: activeSection === 'demandes', badge: demandesModification.filter(d => d.statut === 'en_attente').length + demandesCreation.filter(d => d.statut === 'en_attente').length + demandesReset.filter(d => d.statut === 'en_attente').length },
               { icon: 'fa-cog', label: 'Paramètres', section: 'parametres', active: activeSection === 'parametres' },
               { icon: 'fa-sign-out-alt', label: 'Déconnexion', section: 'logout', active: false },
             ].map((item, i) => (
@@ -5609,6 +5750,224 @@ export default function AdminDashboard() {
                   </div>
                 )}
               </div>
+
+              {/* Demandes de Réinitialisation de Mot de Passe */}
+              <div style={{ marginTop: '48px' }}>
+                <h2 style={{ margin: '0 0 24px', fontSize: '20px', fontWeight: 600, color: currentTheme.colors.text, display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <i className="fas fa-key" style={{ fontSize: '20px', color: currentTheme.colors.primary }}></i>
+                  Demandes de Réinitialisation de Mot de Passe ({demandesReset.filter(d => d.statut === 'en_attente').length} en attente)
+                </h2>
+                
+                {loadingDemandesReset ? (
+                  <div style={{ textAlign: 'center', padding: '40px' }}>
+                    <i className="fas fa-spinner fa-spin" style={{ fontSize: '28px', color: currentTheme.colors.textTertiary }}></i>
+                    <p style={{ marginTop: '16px', color: currentTheme.colors.textTertiary }}>Chargement des demandes...</p>
+                  </div>
+                ) : demandesReset.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '60px 20px',
+                    backgroundColor: currentTheme.colors.cardBackground,
+                    borderRadius: '12px',
+                    border: `1px solid ${currentTheme.colors.border}`
+                  }}>
+                    <i className="fas fa-key" style={{ fontSize: '48px', color: '#d1d5db', marginBottom: '16px' }}></i>
+                    <p style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 500, color: currentTheme.colors.text }}>Aucune demande de réinitialisation</p>
+                    <p style={{ margin: 0, fontSize: '14px', color: currentTheme.colors.textTertiary }}>Les demandes de réinitialisation de mot de passe apparaîtront ici</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: '16px' }}>
+                    {demandesReset
+                      .sort((a, b) => {
+                        const priority = { 'en_attente': 0, 'approuvee': 1, 'rejetee': 2 };
+                        if (priority[a.statut] !== priority[b.statut]) {
+                          return priority[a.statut] - priority[b.statut];
+                        }
+                        return new Date(b.dateCreation) - new Date(a.dateCreation);
+                      })
+                      .map((demande) => (
+                      <div
+                        key={demande.id}
+                        style={{
+                          display: 'flex',
+                          gap: '16px',
+                          padding: '20px',
+                          backgroundColor: demande.statut === 'en_attente' 
+                            ? (isDark ? 'rgba(245, 158, 11, 0.1)' : '#fffbeb')
+                            : currentTheme.colors.cardBackground,
+                          borderRadius: '12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          transition: 'all 0.2s ease',
+                          overflow: 'hidden',
+                          width: '100%',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              gap: '6px',
+                              padding: '6px 12px',
+                              borderRadius: '20px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              backgroundColor: demande.statut === 'en_attente' 
+                                ? (isDark ? 'rgba(245, 158, 11, 0.2)' : '#fef3c7')
+                                : demande.statut === 'approuvee'
+                                ? (isDark ? 'rgba(76, 175, 80, 0.2)' : '#dcfce7')
+                                : (isDark ? 'rgba(244, 67, 54, 0.2)' : '#ffebee'),
+                              color: demande.statut === 'en_attente'
+                                ? (isDark ? '#f59e0b' : '#92400e')
+                                : demande.statut === 'approuvee'
+                                ? (isDark ? '#4caf50' : '#166534')
+                                : (isDark ? '#f44336' : '#b71c1c')
+                            }}>
+                              <i className={`fas ${
+                                demande.statut === 'en_attente' ? 'fa-clock' :
+                                demande.statut === 'approuvee' ? 'fa-check-circle' :
+                                'fa-times-circle'
+                              }`} style={{ fontSize: '10px' }}></i>
+                              {demande.statut === 'en_attente' ? 'En attente' :
+                               demande.statut === 'approuvee' ? 'Approuvée' :
+                               'Rejetée'}
+                            </span>
+                            <span style={{
+                              fontSize: '14px',
+                              fontWeight: 600,
+                              color: currentTheme.colors.text
+                            }}>
+                              Demande de réinitialisation
+                            </span>
+                          </div>
+                          
+                          <div style={{ marginBottom: '8px' }}>
+                            <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              Utilisateur: <strong style={{ color: currentTheme.colors.text }}>{demande.nom || 'N/A'}</strong>
+                            </div>
+                            <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              Matricule: <strong style={{ color: currentTheme.colors.text }}>{demande.matricule}</strong>
+                            </div>
+                            <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              Poste: <strong style={{ color: currentTheme.colors.text }}>{demande.poste}</strong>
+                            </div>
+                            {demande.email && (
+                              <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                Email: <strong style={{ color: currentTheme.colors.text }}>{demande.email}</strong>
+                              </div>
+                            )}
+                            <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              Date de demande: <strong style={{ color: currentTheme.colors.text }}>
+                                {new Date(demande.dateCreation).toLocaleString('fr-FR', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </strong>
+                            </div>
+                            {demande.dateApprobation && (
+                              <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                Approuvée le: <strong style={{ color: currentTheme.colors.text }}>
+                                  {new Date(demande.dateApprobation).toLocaleString('fr-FR', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </strong>
+                              </div>
+                            )}
+                            {demande.dateRejet && (
+                              <div style={{ fontSize: '12px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                Rejetée le: <strong style={{ color: currentTheme.colors.text }}>
+                                  {new Date(demande.dateRejet).toLocaleString('fr-FR', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {demande.statut === 'en_attente' && (
+                          <div style={{ display: 'flex', gap: '10px', flexShrink: 0, flexDirection: 'column', justifyContent: 'center', maxWidth: '140px', width: '100%' }}>
+                            <button
+                              onClick={() => {
+                                setSelectedResetDemande(demande);
+                                setShowResetApproveModal(true);
+                              }}
+                              disabled={loading}
+                              style={{
+                                padding: '10px 16px',
+                                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '10px',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                opacity: loading ? 0.6 : 1,
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                whiteSpace: 'nowrap',
+                                boxShadow: 'none',
+                                width: '100%',
+                                overflow: 'hidden',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            >
+                              <i className="fas fa-check-circle" style={{ fontSize: '14px' }}></i>
+                              Approuver
+                            </button>
+                            <button
+                              onClick={() => handleRejeterDemandeReset(demande)}
+                              disabled={loading}
+                              style={{
+                                padding: '10px 16px',
+                                background: 'linear-gradient(135deg, #f87171 0%, #ef4444 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '10px',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                                cursor: loading ? 'not-allowed' : 'pointer',
+                                opacity: loading ? 0.6 : 1,
+                                transition: 'all 0.2s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '6px',
+                                whiteSpace: 'nowrap',
+                                boxShadow: 'none',
+                                width: '100%',
+                                overflow: 'hidden',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            >
+                              <i className="fas fa-times-circle" style={{ fontSize: '14px' }}></i>
+                              Rejeter
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -7043,6 +7402,189 @@ export default function AdminDashboard() {
                   setShowApproveModal(false);
                   setSelectedDemande(null);
                   setApproveForm({ nom: '', contact: '', email: '' });
+                }}
+                disabled={loading}
+                style={{
+                  padding: '12px 24px',
+                  background: 'transparent',
+                  color: currentTheme.colors.text,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal d'approbation de demande de réinitialisation de mot de passe */}
+      {showResetApproveModal && selectedResetDemande && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)'
+        }} onClick={() => {
+          if (!loading) {
+            setShowResetApproveModal(false);
+            setSelectedResetDemande(null);
+            setResetPasswordForm({ newPassword: '', confirmPassword: '' });
+          }
+        }}>
+          <div style={{
+            backgroundColor: currentTheme.colors.cardBackground,
+            borderRadius: '16px',
+            padding: '32px',
+            maxWidth: '500px',
+            width: '90%',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+            border: `1px solid ${currentTheme.colors.border}`
+          }} onClick={(e) => e.stopPropagation()}>
+            <h2 style={{
+              margin: '0 0 24px',
+              fontSize: '24px',
+              fontWeight: 700,
+              color: currentTheme.colors.text,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <i className="fas fa-key" style={{ color: currentTheme.colors.primary }}></i>
+              Approuver la demande de réinitialisation
+            </h2>
+            
+            <div style={{ marginBottom: '20px', padding: '16px', backgroundColor: currentTheme.colors.backgroundTertiary, borderRadius: '8px' }}>
+              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '8px' }}>
+                Utilisateur: <strong style={{ color: currentTheme.colors.text }}>{selectedResetDemande.nom || 'N/A'}</strong>
+              </div>
+              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '8px' }}>
+                Matricule: <strong style={{ color: currentTheme.colors.text }}>{selectedResetDemande.matricule}</strong>
+              </div>
+              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                Poste: <strong style={{ color: currentTheme.colors.text }}>{selectedResetDemande.poste}</strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '20px' }}>
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontWeight: 600,
+                  color: currentTheme.colors.text,
+                  fontSize: '14px'
+                }}>
+                  Nouveau mot de passe <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="password"
+                  value={resetPasswordForm.newPassword}
+                  onChange={(e) => setResetPasswordForm({ ...resetPasswordForm, newPassword: e.target.value })}
+                  placeholder="Entrez le nouveau mot de passe"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: currentTheme.colors.background,
+                    color: currentTheme.colors.text,
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontWeight: 600,
+                  color: currentTheme.colors.text,
+                  fontSize: '14px'
+                }}>
+                  Confirmer le mot de passe <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="password"
+                  value={resetPasswordForm.confirmPassword}
+                  onChange={(e) => setResetPasswordForm({ ...resetPasswordForm, confirmPassword: e.target.value })}
+                  placeholder="Confirmez le nouveau mot de passe"
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    backgroundColor: currentTheme.colors.background,
+                    color: currentTheme.colors.text,
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+              <button
+                onClick={handleApprouverDemandeReset}
+                disabled={loading || !resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword || resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword || resetPasswordForm.newPassword.length < 6}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  background: loading || !resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword || resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword || resetPasswordForm.newPassword.length < 6
+                    ? currentTheme.colors.backgroundTertiary
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: loading || !resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword || resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword || resetPasswordForm.newPassword.length < 6
+                    ? currentTheme.colors.textTertiary
+                    : 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: loading || !resetPasswordForm.newPassword || !resetPasswordForm.confirmPassword || resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword || resetPasswordForm.newPassword.length < 6
+                    ? 'not-allowed'
+                    : 'pointer',
+                  transition: 'all 0.2s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                {loading ? (
+                  <>
+                    <i className="fas fa-spinner fa-spin"></i>
+                    Traitement...
+                  </>
+                ) : (
+                  <>
+                    <i className="fas fa-check-circle"></i>
+                    Approuver et réinitialiser
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  setShowResetApproveModal(false);
+                  setSelectedResetDemande(null);
+                  setResetPasswordForm({ newPassword: '', confirmPassword: '' });
                 }}
                 disabled={loading}
                 style={{
