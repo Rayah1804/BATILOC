@@ -380,15 +380,15 @@
   height: 100%;
   object-fit: cover;
   object-position: center;
-  filter: none;
   opacity: 1;
   position: relative;
   z-index: 0;
   transition: transform 0.5s ease;
+  transform: scale(1.1);
 }
 
 .home-left-section:hover .train-illustration-img {
-  transform: scale(1.02);
+  transform: scale(1.15);
 }
 
 
@@ -1039,8 +1039,8 @@
 }
 
 .home-container.dark-mode .train-illustration-img {
-  filter: none;
   opacity: 1;
+  transform: scale(1.1);
 }
 
 .home-container.dark-mode .train-illustration::before {

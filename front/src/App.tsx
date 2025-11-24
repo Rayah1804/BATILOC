@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import "./style.css";
 import fceL from './images/fcee.gif';
+import batilockLogo from './images/2.png';
 import { useLocation, useNavigate } from "react-router-dom";
 
 export default function AuthForm() {
@@ -11,7 +12,7 @@ export default function AuthForm() {
   const [loginPassword, setLoginPassword] = useState("");
 
   // Handler de soumission du formulaire de connexion
-  const handleLoginSubmit = async (e) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage({ type: '', text: '' });
@@ -51,7 +52,22 @@ export default function AuthForm() {
         }, 1200);
         // L'animation continuera jusqu'à ce que la page se charge
       } else {
-        setMessage({ type: 'danger', text: `Erreur: ${data.message || 'Erreur de connexion.'} Poste reçu: ${data.user?.poste || 'aucun'}` });
+        // Vérifier si c'est une demande de création de compte
+        if (data.demandeCreee || data.demandeEnAttente) {
+          if (data.demandeEnAttente) {
+            setMessage({ 
+              type: 'warning', 
+              text: 'Votre demande de création de compte est en attente d\'approbation par l\'administrateur. Vous recevrez une notification une fois approuvée.' 
+            });
+          } else {
+            setMessage({ 
+              type: 'info', 
+              text: 'Votre demande de création de compte a été envoyée à l\'administrateur. Vous recevrez une notification une fois approuvée. Vous pouvez réessayer de vous connecter après l\'approbation.' 
+            });
+          }
+        } else {
+          setMessage({ type: 'danger', text: `Erreur: ${data.message || 'Erreur de connexion.'} Poste reçu: ${data.user?.poste || 'aucun'}` });
+        }
         setLoading(false);
       }
     } catch (err) {
@@ -71,18 +87,32 @@ export default function AuthForm() {
   const [currentStep, setCurrentStep] = useState(1);
   const [fadeIn, setFadeIn] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1: demande, 2: vérification code, 3: nouveau mot de passe
+  const [resetData, setResetData] = useState({
+    matricule: '',
+    poste: '',
+    email: '',
+    code: '',
+    newPassword: '',
+    confirmPassword: '',
+    recoveryKey: ''
+  });
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState({ type: '', text: '' });
 
   useEffect(() => {
     setFadeIn(true);
   }, []);
 
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const handleMouseMove = (e: Event) => {
+      const mouseEvent = e as MouseEvent;
       const container = document.querySelector('.modal-auth-container');
       if (container) {
         const rect = container.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width - 0.5) * 20;
-        const y = ((e.clientY - rect.top) / rect.height - 0.5) * 20;
+        const x = ((mouseEvent.clientX - rect.left) / rect.width - 0.5) * 20;
+        const y = ((mouseEvent.clientY - rect.top) / rect.height - 0.5) * 20;
         setMousePosition({ x, y });
       }
     };
@@ -96,54 +126,17 @@ export default function AuthForm() {
 
   return (
     <div className="modal-overlay">
-      {/* Animated particles/geometric shapes */}
-      <div className="animated-bg-elements">
-        <div className="bg-orb bg-orb-1"></div>
-        <div className="bg-orb bg-orb-2"></div>
-        <div className="bg-orb bg-orb-3"></div>
-        <div className="bg-geometric bg-geometric-1"></div>
-        <div className="bg-geometric bg-geometric-2"></div>
-      </div>
       <div 
         className={`modal-auth-container fade-in-auth${fadeIn ? ' show' : ''}`}
-        style={{
-          transform: `perspective(1200px) rotateX(${mousePosition.y * -0.05}deg) rotateY(${mousePosition.x * 0.05}deg) translateZ(0)`,
-          transition: 'transform 0.1s ease-out'
-        }}
       > 
-        {/* Bloc unique : logo, tabs, formulaire */}
-        <div className="auth-header" style={{ marginBottom: '1.2rem' }}>
-          <img src={fceL} alt="Logo FCE" className="logo-img" />
-          <div className="auth-header-text">
-            <div className="auth-header-subtitle">Depuis 1936</div>
-            <div className="auth-header-motto">
-              <div>Efa Ela Nitaterana . . .</div>
-              <div>. . . Sady Mbola Hianteherana</div>
-            </div>
-          </div>
+        {/* Logo Batiloc */}
+        <div className="auth-logo-container">
+          <img src={batilockLogo} alt="Batiloc Logo" className="auth-logo-img" />
         </div>
-        {/* Tabs */}
-        <div className="tabs-container">
-          <button
-            className={`tab-button ${isLogin ? 'active' : ''}`}
-            onClick={() => {
-              setIsLogin(true);
-              setMessage({ type: '', text: '' });
-              setCurrentStep(1);
-            }}
-          >
-            Connexion
-          </button>
-          <button
-            className={`tab-button ${!isLogin ? 'active' : ''}`}
-            onClick={() => {
-              setIsLogin(false);
-              setMessage({ type: '', text: '' });
-              setCurrentStep(1);
-            }}
-          >
-            Inscription
-          </button>
+        
+        {/* Header avec titre */}
+        <div className="auth-header" style={{ marginBottom: '1.2rem' }}>
+          <div className="login-title">BIENVENUE</div>
         </div>
         <div className="form-container">
           {/* Messages */}
@@ -156,6 +149,10 @@ export default function AuthForm() {
           {isLogin ? (
             <form onSubmit={handleLoginSubmit} autoComplete="off">
               <div className="input-group">
+                <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                  <path d="M3 7l9 6 9-6"></path>
+                </svg>
                 <input
                   type="text"
                   placeholder="Matricule"
@@ -166,11 +163,18 @@ export default function AuthForm() {
                 />
               </div>
               <div className="input-group">
+                <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
                 <select
                   className="select-field form-control"
                   value={loginPoste}
                   onChange={e => setLoginPoste(e.target.value)}
                   required
+                  style={{ paddingLeft: '3rem', appearance: 'none', backgroundImage: 'none' }}
                 >
                   <option value="">Sélectionnez votre poste</option>
                   <option value="caissier">Caissier</option>
@@ -179,6 +183,10 @@ export default function AuthForm() {
                 </select>
               </div>
               <div className="input-group password-wrapper">
+                <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
                 <input
                   type={showPassword ? "text" : "password"}
                   placeholder="Mot de passe"
@@ -205,6 +213,77 @@ export default function AuthForm() {
                     </svg>
                   )}
                 </button>
+              </div>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: '1.5rem', 
+                marginTop: '0.5rem', 
+                fontSize: '0.85rem', 
+                color: '#2c5282',
+                fontWeight: '500',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem', 
+                  cursor: 'pointer', 
+                  userSelect: 'none' 
+                }}>
+               <a 
+                  href="#" 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setShowResetModal(true);
+                    setResetStep(1);
+                  }}
+                  style={{ 
+                    color: '#2c5282', 
+                    textDecoration: 'none',
+                    cursor: 'pointer',
+                    transition: 'opacity 0.3s ease'
+                  }} 
+                  onMouseEnter={(e) => e.currentTarget.style.opacity = '0.7'}
+                  onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                >
+                  MOT DE PASSE OUBLIÉ ?
+                </a>
+                </label>
+              </div>
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                marginBottom: '1.5rem', 
+                marginTop: '0.5rem', 
+                fontSize: '0.85rem', 
+                color: '#2c5282',
+                fontWeight: '500',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px'
+              }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem', 
+                  cursor: 'pointer', 
+                  userSelect: 'none' 
+                }}>
+                  <input 
+                    type="checkbox" 
+                    style={{ 
+                      width: '16px', 
+                      height: '16px', 
+                      cursor: 'pointer', 
+                      accentColor: '#2c5282'
+                    }} 
+                  />
+                  <span>se souvenir de moi</span>
+                </label>
+
               </div>
               <button 
                 className="submit-button w-100" 
@@ -314,6 +393,245 @@ export default function AuthForm() {
           }
         `}</style>
       </div>
+
+      {/* Modal de réinitialisation de mot de passe */}
+      {showResetModal && (
+        <div className="reset-password-modal">
+          <div className="reset-password-content">
+            <button 
+              className="close-reset-modal"
+              onClick={() => {
+                setShowResetModal(false);
+                setResetStep(1);
+                setResetData({
+                  matricule: '',
+                  poste: '',
+                  email: '',
+                  code: '',
+                  newPassword: '',
+                  confirmPassword: '',
+                  recoveryKey: ''
+                });
+                setResetMessage({ type: '', text: '' });
+              }}
+            >
+              ×
+            </button>
+            {/* Logo Batiloc */}
+            <div className="auth-logo-container">
+              <img src={batilockLogo} alt="Batiloc Logo" className="auth-logo-img" />
+            </div>
+            {/* Header avec titre */}
+            <div className="auth-header" style={{ marginBottom: '1.2rem' }}>
+              <div className="login-title">RÉINITIALISATION</div>
+            </div>
+            <div className="form-container">
+            
+            {resetMessage.text && (
+              <div className={`alert ${resetMessage.type === 'success' ? 'alert-success' : resetMessage.type === 'warning' ? 'alert-warning' : 'alert-danger'} mt-3`}>
+                {resetMessage.text}
+              </div>
+            )}
+
+            {resetStep === 1 && (
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setResetLoading(true);
+                setResetMessage({ type: '', text: '' });
+                
+                try {
+                  const response = await fetch('http://localhost:3000/api/user/reset-password/request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      matricule: resetData.matricule,
+                      poste: resetData.poste,
+                      email: resetData.email
+                    })
+                  });
+                  
+                  const data = await response.json();
+                  
+                  if (response.ok) {
+                    setResetMessage({ 
+                      type: 'success', 
+                      text: data.code ? `Code généré: ${data.code} (valable 15 minutes)` : 'Code envoyé par email' 
+                    });
+                    setResetStep(2);
+                  } else {
+                    setResetMessage({ type: 'danger', text: data.message || 'Erreur lors de la génération du code' });
+                  }
+                } catch (err) {
+                  setResetMessage({ type: 'danger', text: 'Erreur serveur ou réseau' });
+                } finally {
+                  setResetLoading(false);
+                }
+              }}>
+                <div className="input-group">
+                  <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                    <path d="M3 7l9 6 9-6"></path>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Matricule"
+                    className="input-field"
+                    value={resetData.matricule}
+                    onChange={e => setResetData({...resetData, matricule: e.target.value})}
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  <select
+                    className="select-field"
+                    value={resetData.poste}
+                    onChange={e => setResetData({...resetData, poste: e.target.value})}
+                    required
+                    style={{ paddingLeft: '2.5rem' }}
+                  >
+                    <option value="">Sélectionnez votre poste</option>
+                    <option value="caissier">Caissier</option>
+                    <option value="administrateur">Administrateur</option>
+                    <option value="opérateur de saisie">Opérateur de saisie</option>
+                  </select>
+                </div>
+                {resetData.poste === 'administrateur' && (
+                  <div className="input-group">
+                    <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="Clé de récupération (optionnel)"
+                      className="input-field"
+                      value={resetData.recoveryKey}
+                      onChange={e => setResetData({...resetData, recoveryKey: e.target.value})}
+                    />
+                    <small style={{ color: '#999', fontSize: '0.75rem', marginTop: '0.5rem', display: 'block', opacity: 0.7 }}>
+                      Clé d'urgence pour admin (voir .env ADMIN_RECOVERY_KEY)
+                    </small>
+                  </div>
+                )}
+                <button className="submit-button w-100" type="submit" disabled={resetLoading}>
+                  {resetLoading ? 'Génération...' : 'Générer le code'}
+                </button>
+              </form>
+            )}
+
+            {resetStep === 2 && (
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                
+                if (resetData.newPassword !== resetData.confirmPassword) {
+                  setResetMessage({ type: 'danger', text: 'Les mots de passe ne correspondent pas' });
+                  return;
+                }
+
+                if (resetData.newPassword.length < 6) {
+                  setResetMessage({ type: 'danger', text: 'Le mot de passe doit contenir au moins 6 caractères' });
+                  return;
+                }
+
+                setResetLoading(true);
+                setResetMessage({ type: '', text: '' });
+                
+                try {
+                  const response = await fetch('http://localhost:3000/api/user/reset-password/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      matricule: resetData.matricule,
+                      poste: resetData.poste,
+                      code: resetData.code || undefined,
+                      recoveryKey: resetData.recoveryKey || undefined,
+                      newPassword: resetData.newPassword
+                    })
+                  });
+                  
+                  const data = await response.json();
+                  
+                  if (response.ok) {
+                    setResetMessage({ type: 'success', text: 'Mot de passe réinitialisé avec succès ! Vous pouvez maintenant vous connecter.' });
+                    setTimeout(() => {
+                      setShowResetModal(false);
+                      setResetStep(1);
+                      setResetData({
+                        matricule: '',
+                        poste: '',
+                        email: '',
+                        code: '',
+                        newPassword: '',
+                        confirmPassword: '',
+                        recoveryKey: ''
+                      });
+                    }, 2000);
+                  } else {
+                    setResetMessage({ type: 'danger', text: data.message || 'Erreur lors de la réinitialisation' });
+                  }
+                } catch (err) {
+                  setResetMessage({ type: 'danger', text: 'Erreur serveur ou réseau' });
+                } finally {
+                  setResetLoading(false);
+                }
+              }}>
+                <div className="input-group">
+                  <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="5" width="18" height="14" rx="2"></rect>
+                    <path d="M3 7l9 6 9-6"></path>
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Code de réinitialisation"
+                    className="input-field"
+                    value={resetData.code}
+                    onChange={e => setResetData({...resetData, code: e.target.value})}
+                    required={!resetData.recoveryKey}
+                  />
+                </div>
+                <div className="input-group password-wrapper">
+                  <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <input
+                    type="password"
+                    placeholder="Nouveau mot de passe"
+                    className="input-field"
+                    value={resetData.newPassword}
+                    onChange={e => setResetData({...resetData, newPassword: e.target.value})}
+                    required
+                  />
+                </div>
+                <div className="input-group password-wrapper">
+                  <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                  <input
+                    type="password"
+                    placeholder="Confirmer le mot de passe"
+                    className="input-field"
+                    value={resetData.confirmPassword}
+                    onChange={e => setResetData({...resetData, confirmPassword: e.target.value})}
+                    required
+                  />
+                </div>
+                <button className="submit-button w-100" type="submit" disabled={resetLoading}>
+                  {resetLoading ? 'Réinitialisation...' : 'Réinitialiser'}
+                </button>
+              </form>
+            )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
