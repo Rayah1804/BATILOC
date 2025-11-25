@@ -227,3 +227,6 @@ WHERE matricule = '200000' AND poste = 'administrateur';
    - Considérez stocker les codes dans une table dédiée plutôt qu'en JSON
    - Implémentez un nettoyage automatique des codes expirés
 
+
+
+

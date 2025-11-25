@@ -207,11 +207,17 @@ export default function RedacteurHome() {
   }, [activeSection]);
 
   // Load bâtiments when the wizard opens (even if we are in conventions section)
+  // Pour la création de convention, charger uniquement les bâtiments disponibles
+  // Pour l'édition, charger tous les bâtiments
   useEffect(() => {
-    if (showWizard && batiments.length === 0) {
-      loadBatiments();
+    if (showWizard) {
+      // Si on est en mode création (pas d'editingConv), toujours recharger les bâtiments disponibles
+      // Si on est en mode édition (editingConv existe), charger tous les bâtiments
+      const availableOnly = !editingConv;
+      console.log(`🔍 Chargement bâtiments - Mode création: ${availableOnly}, editingConv: ${editingConv ? editingConv.numConv : 'null'}`);
+      loadBatiments(availableOnly);
     }
-  }, [showWizard]);
+  }, [showWizard, editingConv]);
 
   // Gérer l'overlay de chargement pendant la connexion
   useEffect(() => {
@@ -232,17 +238,40 @@ export default function RedacteurHome() {
     setStep1(initialStep1);
     setStep2(initialStep2);
     setEditingConv(null);
+    // Réinitialiser la liste des bâtiments pour forcer le rechargement avec les bons filtres
+    // Cela garantit qu'on charge toujours les bâtiments disponibles lors de la création
+    setBatiments([]);
+  };
+  
+  // Fonction pour ouvrir le wizard en mode création (nouvelle convention)
+  const openNewConventionWizard = () => {
+    // Réinitialiser d'abord pour mettre editingConv à null
+    resetWizard();
+    // Ouvrir le wizard - le useEffect se chargera de recharger les bâtiments disponibles
+    setShowWizard(true);
   };
 
-  const loadBatiments = async () => {
+  const loadBatiments = async (availableOnly = false) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const r = await fetch(API_BATS, {
+      // Ajouter le paramètre available=true si on charge uniquement les bâtiments disponibles
+      // Ajouter un timestamp pour éviter le cache
+      const timestamp = new Date().getTime();
+      const url = availableOnly 
+        ? `${API_BATS}?available=true&_t=${timestamp}` 
+        : `${API_BATS}?_t=${timestamp}`;
+      
+      console.log(`🏗️ Chargement bâtiments - URL: ${url}, availableOnly: ${availableOnly}`);
+      
+      const r = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        cache: 'no-store'
       });
       if (r.status === 401 || r.status === 403) {
         localStorage.removeItem('token');
@@ -251,9 +280,15 @@ export default function RedacteurHome() {
         return;
       }
       const j = await r.json();
-      if (j.status === 200) setBatiments(j.data || []);
+      if (j.status === 200) {
+        console.log(`✅ ${j.data?.length || 0} bâtiment(s) chargé(s) (availableOnly: ${availableOnly})`);
+        setBatiments(j.data || []);
+      } else {
+        console.error('❌ Erreur chargement bâtiments:', j);
+        setMsg("Erreur chargement bâtiments");
+      }
     } catch (e) {
-      console.error(e);
+      console.error('❌ Erreur chargement bâtiments:', e);
       setMsg("Erreur chargement bâtiments");
     } finally {
       setLoading(false);
@@ -1744,7 +1779,7 @@ export default function RedacteurHome() {
                 borderRadius: '16px',
                 padding: '28px',
                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                border: '1px solid #e5e7eb',
+                border: `1px solid ${currentTheme.colors.border}`,
                 transition: 'all 0.3s ease'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '24px' }}>
@@ -1767,7 +1802,7 @@ export default function RedacteurHome() {
                 </div>
 
                 <div style={{ display: 'grid', gap: '20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: isDark ? currentTheme.colors.backgroundTertiary : '#f9fafb', borderRadius: '12px' }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '14px', color: currentTheme.colors.text, marginBottom: '4px' }}>Langue</div>
                       <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary }}>Choisissez votre langue préférée</div>
@@ -1788,7 +1823,7 @@ export default function RedacteurHome() {
                     </select>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: isDark ? currentTheme.colors.backgroundTertiary : '#f9fafb', borderRadius: '12px' }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '14px', color: currentTheme.colors.text, marginBottom: '4px' }}>Format de date</div>
                       <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary }}>Format d'affichage des dates</div>
@@ -1809,7 +1844,7 @@ export default function RedacteurHome() {
                     </select>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: isDark ? currentTheme.colors.backgroundTertiary : '#f9fafb', borderRadius: '12px' }}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: '14px', color: currentTheme.colors.text, marginBottom: '4px' }}>Thème</div>
                       <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary }}>Apparence de l'interface</div>
@@ -1848,34 +1883,36 @@ export default function RedacteurHome() {
                       <i className="fas fa-file-contract" style={{ fontSize: '24px', color: 'white' }}></i>
                     </div>
                     <div>
-                      <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#1f2937' }}>Paramètres de Conventions</h2>
-                      <p style={{ margin: '4px 0 0', fontSize: '14px', color: '#6b7280' }}>Configuration des conventions</p>
+                      <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: currentTheme.colors.text }}>Paramètres de Conventions</h2>
+                      <p style={{ margin: '4px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>Configuration des conventions</p>
                     </div>
                   </div>
 
                   <div style={{ display: 'grid', gap: '20px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: isDark ? currentTheme.colors.backgroundTertiary : '#f9fafb', borderRadius: '12px' }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '14px', color: '#1f2937', marginBottom: '4px' }}>Limite de modifications</div>
-                        <div style={{ fontSize: '13px', color: '#6b7280' }}>Nombre maximum de modifications par convention</div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', color: currentTheme.colors.text, marginBottom: '4px' }}>Limite de modifications</div>
+                        <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary }}>Nombre maximum de modifications par convention</div>
                       </div>
                       <div style={{
                         padding: '10px 20px',
                         borderRadius: '10px',
-                        background: 'linear-gradient(135deg, #e7f3ff 0%, #d0e7ff 100%)',
-                        border: '2px solid #007bff',
+                        background: isDark 
+                          ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.2) 100%)'
+                          : 'linear-gradient(135deg, #e7f3ff 0%, #d0e7ff 100%)',
+                        border: `2px solid ${isDark ? '#3b82f6' : '#007bff'}`,
                         fontWeight: 700,
                         fontSize: '18px',
-                        color: '#007bff'
+                        color: isDark ? '#60a5fa' : '#007bff'
                       }}>
                         2
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', background: isDark ? currentTheme.colors.backgroundTertiary : '#f9fafb', borderRadius: '12px' }}>
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '14px', color: '#1f2937', marginBottom: '4px' }}>Format d'impression</div>
-                        <div style={{ fontSize: '13px', color: '#6b7280' }}>Format par défaut pour l'impression</div>
+                        <div style={{ fontWeight: 600, fontSize: '14px', color: currentTheme.colors.text, marginBottom: '4px' }}>Format d'impression</div>
+                        <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary }}>Format par défaut pour l'impression</div>
                       </div>
                       <select style={{
                         padding: '10px 16px',
@@ -2264,10 +2301,14 @@ export default function RedacteurHome() {
               marginBottom: '32px' 
             }}>
               <div style={{
-                background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+                background: isDark 
+                  ? 'linear-gradient(135deg, #1e3a5f 0%, #0f1f3a 100%)'
+                  : 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
                 padding: '24px',
                 borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0, 123, 255, 0.3)',
+                boxShadow: isDark 
+                  ? '0 4px 12px rgba(30, 58, 95, 0.4)'
+                  : '0 4px 12px rgba(0, 123, 255, 0.3)',
                 color: 'white'
               }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', fontWeight: 500 }}>
@@ -2283,10 +2324,14 @@ export default function RedacteurHome() {
               </div>
 
               <div style={{
-                background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+                background: isDark 
+                  ? 'linear-gradient(135deg, #1e3a5f 0%, #0f1f3a 100%)'
+                  : 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
                 padding: '24px',
                 borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0, 123, 255, 0.3)',
+                boxShadow: isDark 
+                  ? '0 4px 12px rgba(30, 58, 95, 0.4)'
+                  : '0 4px 12px rgba(0, 123, 255, 0.3)',
                 color: 'white'
               }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', fontWeight: 500 }}>
@@ -2302,10 +2347,14 @@ export default function RedacteurHome() {
               </div>
 
               <div style={{
-                background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+                background: isDark 
+                  ? 'linear-gradient(135deg, #1e3a5f 0%, #0f1f3a 100%)'
+                  : 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
                 padding: '24px',
                 borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0, 123, 255, 0.3)',
+                boxShadow: isDark 
+                  ? '0 4px 12px rgba(30, 58, 95, 0.4)'
+                  : '0 4px 12px rgba(0, 123, 255, 0.3)',
                 color: 'white'
               }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', fontWeight: 500 }}>
@@ -2321,10 +2370,14 @@ export default function RedacteurHome() {
               </div>
 
               <div style={{
-                background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+                background: isDark 
+                  ? 'linear-gradient(135deg, #1e3a5f 0%, #0f1f3a 100%)'
+                  : 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
                 padding: '24px',
                 borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0, 123, 255, 0.3)',
+                boxShadow: isDark 
+                  ? '0 4px 12px rgba(30, 58, 95, 0.4)'
+                  : '0 4px 12px rgba(0, 123, 255, 0.3)',
                 color: 'white'
               }}>
                 <div style={{ fontSize: '13px', opacity: 0.9, marginBottom: '8px', fontWeight: 500 }}>
@@ -2855,7 +2908,7 @@ export default function RedacteurHome() {
                 margin: '0 0 8px', 
                 fontSize: '28px', 
                 fontWeight: 700, 
-                color: '#1f2937',
+                color: currentTheme.colors.text,
                 lineHeight: 1.2
               }}>
                 Tableau de bord
@@ -2863,7 +2916,7 @@ export default function RedacteurHome() {
               <p style={{ 
                 margin: 0, 
                 fontSize: '14px', 
-                color: '#6b7280',
+                color: currentTheme.colors.textTertiary,
                 fontWeight: 400
               }}>
                 Vue d'ensemble de votre activité de conventions
@@ -2891,17 +2944,17 @@ export default function RedacteurHome() {
                     width: '48px',
                     height: '48px',
                     borderRadius: '12px',
-                    background: '#eff6ff',
+                    background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     position: 'relative'
                   }}>
-                    <i className="fas fa-file-contract" style={{ fontSize: '20px', color: '#3b82f6', lineHeight: 1 }}></i>
+                    <i className="fas fa-file-contract" style={{ fontSize: '20px', color: isDark ? '#60a5fa' : '#3b82f6', lineHeight: 1 }}></i>
                   </div>
                 </div>
-                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Conventions totales</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: '#1f2937', textAlign: 'center' }}>{stats.total}</div>
+                <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Conventions totales</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, textAlign: 'center' }}>{stats.total}</div>
               </div>
 
               {/* Carte Confirmées */}
@@ -2918,17 +2971,17 @@ export default function RedacteurHome() {
                     width: '48px',
                     height: '48px',
                     borderRadius: '12px',
-                    background: '#dcfce7',
+                    background: isDark ? 'rgba(34, 197, 94, 0.2)' : '#dcfce7',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     position: 'relative'
                   }}>
-                    <i className="fas fa-check-circle" style={{ fontSize: '20px', color: '#22c55e', lineHeight: '48px', width: '20px', textAlign: 'center' }}></i>
+                    <i className="fas fa-check-circle" style={{ fontSize: '20px', color: isDark ? '#4ade80' : '#22c55e', lineHeight: '48px', width: '20px', textAlign: 'center' }}></i>
                   </div>
                 </div>
-                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Conventions confirmées</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: '#1f2937', textAlign: 'center' }}>{stats.confirmees}</div>
+                <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Conventions confirmées</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, textAlign: 'center' }}>{stats.confirmees}</div>
               </div>
 
               {/* Carte En Attente */}
@@ -2945,17 +2998,17 @@ export default function RedacteurHome() {
                     width: '48px',
                     height: '48px',
                     borderRadius: '12px',
-                    background: '#fef3c7',
+                    background: isDark ? 'rgba(245, 158, 11, 0.2)' : '#fef3c7',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     position: 'relative'
                   }}>
-                    <i className="fas fa-clock" style={{ fontSize: '20px', color: '#f59e0b', lineHeight: 1 }}></i>
+                    <i className="fas fa-clock" style={{ fontSize: '20px', color: isDark ? '#fbbf24' : '#f59e0b', lineHeight: 1 }}></i>
                   </div>
                 </div>
-                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>En attente</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: '#1f2937', textAlign: 'center' }}>{stats.enAttente}</div>
+                <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>En attente</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, textAlign: 'center' }}>{stats.enAttente}</div>
               </div>
 
               {/* Carte Montant Total */}
@@ -2972,17 +3025,17 @@ export default function RedacteurHome() {
                     width: '48px',
                     height: '48px',
                     borderRadius: '12px',
-                    background: '#f3e8ff',
+                    background: isDark ? 'rgba(168, 85, 247, 0.2)' : '#f3e8ff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     position: 'relative'
                   }}>
-                    <i className="fas fa-coins" style={{ fontSize: '20px', color: '#a855f7', lineHeight: 1 }}></i>
+                    <i className="fas fa-coins" style={{ fontSize: '20px', color: isDark ? '#a78bfa' : '#a855f7', lineHeight: 1 }}></i>
                   </div>
                 </div>
-                <div style={{ fontSize: '13px', color: '#6b7280', marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Montant total</div>
-                <div style={{ fontSize: '32px', fontWeight: 700, color: '#1f2937', textAlign: 'center' }}>
+                <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, marginBottom: '8px', fontWeight: 500, textAlign: 'center' }}>Montant total</div>
+                <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, textAlign: 'center' }}>
                   {stats.montantTotal.toLocaleString('fr-FR')} Ar
                 </div>
               </div>
@@ -2997,7 +3050,7 @@ export default function RedacteurHome() {
             }}>
               {/* Bouton Nouvelle convention */}
               <button
-                onClick={() => { setShowWizard(true); resetWizard(); }}
+                onClick={openNewConventionWizard}
                 style={{
                   backgroundColor: '#007bff',
                   color: 'white',
