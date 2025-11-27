@@ -60,7 +60,7 @@ const validateConvention = (req, res, next) => {
 };
 
 const validateBatiment = (req, res, next) => {
-  const { numBat, adresse, montant } = req.body;
+  const { numBat, adresse, montant, ville, quartier, latitude, longitude } = req.body;
   const errors = [];
 
   if (!numBat || isNaN(Number(numBat)) || Number(numBat) <= 0) {
@@ -74,6 +74,28 @@ const validateBatiment = (req, res, next) => {
   }
   if (montant === undefined || montant === null || isNaN(Number(montant)) || Number(montant) < 0) {
     errors.push({ field: 'montant', message: 'Montant invalide' });
+  }
+
+  if (ville && typeof ville === 'string' && ville.trim().length > 60) {
+    errors.push({ field: 'ville', message: 'Ville ne doit pas dépasser 60 caractères' });
+  }
+
+  if (quartier && typeof quartier === 'string' && quartier.trim().length > 60) {
+    errors.push({ field: 'quartier', message: 'Quartier ne doit pas dépasser 60 caractères' });
+  }
+
+  if (latitude !== undefined && latitude !== null && latitude !== '') {
+    const latNumber = Number(latitude);
+    if (isNaN(latNumber) || latNumber < -90 || latNumber > 90) {
+      errors.push({ field: 'latitude', message: 'Latitude invalide' });
+    }
+  }
+
+  if (longitude !== undefined && longitude !== null && longitude !== '') {
+    const longNumber = Number(longitude);
+    if (isNaN(longNumber) || longNumber < -180 || longNumber > 180) {
+      errors.push({ field: 'longitude', message: 'Longitude invalide' });
+    }
   }
 
   if (errors.length > 0) {

@@ -142,12 +142,23 @@ export default function CaissierHome() {
       loadFactures();
       loadStats();
     } else if (activeSection === 'conventions') {
-      loadConventions();
+      loadConventions(search);
     } else if (activeSection === 'paiements') {
       loadPaiements();
       loadStats();
     }
-  }, [activeSection, page, search, evolutionPeriod]);
+  }, [activeSection, page, evolutionPeriod]);
+
+  // Debounce pour la recherche de conventions
+  useEffect(() => {
+    if (activeSection === 'conventions') {
+      const timeoutId = setTimeout(() => {
+        loadConventions(search);
+      }, 300); // Debounce de 300ms
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   // Charger toutes les factures quand le modal de paiement s'ouvre
   useEffect(() => {
@@ -212,13 +223,17 @@ export default function CaissierHome() {
     }
   };
 
-  const loadConventions = async () => {
+  const loadConventions = async (searchQuery = '') => {
     try {
-      // Charger toutes les conventions sans limite pour avoir toutes les données existantes
-      const response = await apiRequest(`${API_ENDPOINTS.CONVENTIONS}?limit=1000`);
+      // Charger les conventions avec recherche si fournie
+      const params = new URLSearchParams({
+        limit: '1000',
+        ...(searchQuery && { q: searchQuery })
+      });
+      const response = await apiRequest(`${API_ENDPOINTS.CONVENTIONS}?${params}`);
       const conventionsData = response.data || [];
       setConventions(conventionsData);
-      console.log(`✅ ${conventionsData.length} conventions chargées`);
+      console.log(`✅ ${conventionsData.length} conventions chargées${searchQuery ? ` (recherche: "${searchQuery}")` : ''}`);
     } catch (err) {
       console.error('Erreur chargement conventions:', err);
       error(err.message || 'Erreur lors du chargement des conventions');

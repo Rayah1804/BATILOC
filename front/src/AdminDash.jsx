@@ -6,8 +6,33 @@ import { lightTheme, darkTheme } from './theme';
 import ThemeToggle from './components/ThemeToggle';
 import { useConfirm } from './hooks/useConfirm';
 import ConfirmModal from './components/ConfirmModal';
+import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
-const initialForm = { numBat: '', adresse: '', montant: '', statut: true };
+const initialForm = {
+  numBat: '',
+  adresse: '',
+  montant: '',
+  statut: true,
+  ville: '',
+  quartier: '',
+  latitude: '',
+  longitude: ''
+};
+
+const defaultMarkerIcon = L.icon({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
 const initialImage = null;
 
 export default function AdminDashboard() {
@@ -46,6 +71,10 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  const [selectedBatimentDetails, setSelectedBatimentDetails] = useState(null);
+  const [showBatimentDetails, setShowBatimentDetails] = useState(false);
+  const [loadingBatimentDetails, setLoadingBatimentDetails] = useState(false);
+  const [showFullscreenMap, setShowFullscreenMap] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showLoginLoader, setShowLoginLoader] = useState(false);
   
@@ -101,6 +130,16 @@ export default function AdminDashboard() {
   });
   const API_USERS_URL = useMemo(() => `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/user`, []);
 
+  const batimentMapCoords = useMemo(() => {
+    if (!selectedBatimentDetails) return null;
+    const latitude = Number(selectedBatimentDetails.latitude);
+    const longitude = Number(selectedBatimentDetails.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return null;
+    }
+    return { lat: latitude, lng: longitude };
+  }, [selectedBatimentDetails]);
+
   // Calcul des dates maximales pour les champs de date
   // Date de naissance : plage de 1907 à 2007 (100 ans en arrière depuis 2007)
   // Minimum : 1er janvier 1907 (2007 - 100 ans)
@@ -149,7 +188,7 @@ export default function AdminDashboard() {
     if (activeSection === 'batiments') {
       loadBatiments();
     } else if (activeSection === 'utilisateurs') {
-      loadUtilisateurs();
+      loadUtilisateurs(searchUser);
     } else if (activeSection === 'conventions') {
       loadConventions();
     } else if (activeSection === 'dashboard') {
@@ -170,6 +209,17 @@ export default function AdminDashboard() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
+
+  // Recharger les utilisateurs quand la recherche change
+  useEffect(() => {
+    if (activeSection === 'utilisateurs') {
+      const timeoutId = setTimeout(() => {
+        loadUtilisateurs(searchUser);
+      }, 300); // Debounce de 300ms
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchUser]);
 
   // Charger les demandes de modification au démarrage pour afficher le badge
   useEffect(() => {
@@ -241,6 +291,9 @@ export default function AdminDashboard() {
     setLoadingHistorique(true);
     try {
       const token = localStorage.getItem('token');
+      // Vérifier si les données de démo sont désactivées
+      const demoDisabled = localStorage.getItem('historiqueDemoDisabled') === 'true';
+      
       // TODO: Remplacer par l'endpoint réel de l'historique quand il sera disponible
       // Pour l'instant, on simule des données
       const API_HISTORIQUE_URL = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/historique`;
@@ -258,28 +311,45 @@ export default function AdminDashboard() {
           if (result.status === 200 && result.data) {
             setHistorique(result.data);
           } else {
-            // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration
+            // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration (si activées)
             const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
+            if (demoDisabled) {
+              setHistorique(historiqueLocal.sort((a, b) => new Date(b.date) - new Date(a.date)));
+            } else {
+              const demo = generateDemoHistorique();
+              setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
+            }
+          }
+        } else {
+          // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration (si activées)
+          const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
+          if (demoDisabled) {
+            setHistorique(historiqueLocal.sort((a, b) => new Date(b.date) - new Date(a.date)));
+          } else {
             const demo = generateDemoHistorique();
             setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
           }
+        }
+      } catch (apiError) {
+        // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration (si activées)
+        const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
+        if (demoDisabled) {
+          setHistorique(historiqueLocal.sort((a, b) => new Date(b.date) - new Date(a.date)));
         } else {
-          // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration
-          const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
           const demo = generateDemoHistorique();
           setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
         }
-      } catch (apiError) {
-        // Si l'API n'existe pas encore, utiliser localStorage + données de démonstration
-        const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
-        const demo = generateDemoHistorique();
-        setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
       }
     } catch (error) {
       console.error('Erreur lors du chargement de l\'historique:', error);
       const historiqueLocal = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
-      const demo = generateDemoHistorique();
-      setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
+      const demoDisabled = localStorage.getItem('historiqueDemoDisabled') === 'true';
+      if (demoDisabled) {
+        setHistorique(historiqueLocal.sort((a, b) => new Date(b.date) - new Date(a.date)));
+      } else {
+        const demo = generateDemoHistorique();
+        setHistorique([...historiqueLocal, ...demo].sort((a, b) => new Date(b.date) - new Date(a.date)));
+      }
     } finally {
       setLoadingHistorique(false);
     }
@@ -291,8 +361,8 @@ export default function AdminDashboard() {
     const types = ['Bâtiment', 'Utilisateur', 'Convention', 'Facture', 'Paiement', 'Système'];
     const users = utilisateurs.length > 0 ? utilisateurs : [
       { matricule: 'ADMIN001', nom: 'Administrateur' },
-      { matricule: 'CAIS001', nom: 'Caissier Test' },
-      { matricule: 'OP001', nom: 'Opérateur Test' }
+      { matricule: 'CAIS001', nom: 'Caissier' },
+      { matricule: 'OP001', nom: 'Redacteur' }
     ];
     
     const historique = [];
@@ -390,18 +460,15 @@ export default function AdminDashboard() {
     try {
       // Supprimer du localStorage
       localStorage.setItem('historiqueActivites', JSON.stringify([]));
+      // Désactiver les données de démonstration pour éviter qu'elles ne reviennent
+      localStorage.setItem('historiqueDemoDisabled', 'true');
       
       // Mettre à jour l'état - vider complètement l'historique
       setHistorique([]);
       setSelectedHistorique([]);
       
-      setMsg('Tout l\'historique a été supprimé');
+      setMsg('Tout l\'historique a été supprimé définitivement');
       setTimeout(() => setMsg(''), 3000);
-      
-      // Recharger l'historique pour voir les données de démo si nécessaire
-      setTimeout(() => {
-        loadHistorique();
-      }, 1000);
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
       setMsg('Erreur lors de la suppression');
@@ -863,6 +930,49 @@ export default function AdminDashboard() {
     }
   };
 
+  const openBatimentDetails = async (batiment) => {
+    if (!batiment) return;
+    setSelectedBatimentDetails(batiment);
+    setShowBatimentDetails(true);
+    setLoadingBatimentDetails(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/${batiment.numBat}?_t=${Date.now()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/auth';
+        return;
+      }
+
+      const result = await response.json();
+      if (result.status === 200 && result.data) {
+        setSelectedBatimentDetails(result.data);
+      } else {
+        setMsg('Impossible de charger le détail du bâtiment');
+        setTimeout(() => setMsg(''), 2500);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement du détail du bâtiment:', error);
+      setMsg('Erreur lors du chargement du détail du bâtiment');
+      setTimeout(() => setMsg(''), 2500);
+    } finally {
+      setLoadingBatimentDetails(false);
+    }
+  };
+
+  const closeBatimentDetails = () => {
+    setShowBatimentDetails(false);
+    setSelectedBatimentDetails(null);
+    setLoadingBatimentDetails(false);
+  };
+
   const loadDemandesSuppression = async () => {
     setLoadingDemandes(true);
     try {
@@ -1256,7 +1366,11 @@ export default function AdminDashboard() {
         setSelectedDemande(null);
         setApproveForm({ nom: '', contact: '', email: '' });
         loadDemandesCreation();
-        loadUtilisateurs();
+        if (activeSection === 'utilisateurs') {
+          loadUtilisateurs(searchUser);
+        } else {
+          loadUtilisateurs();
+        }
       } else {
         const error = await response.json();
         setMsg(error.message || 'Erreur lors de l\'approbation');
@@ -1443,11 +1557,16 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadUtilisateurs = async () => {
+  const loadUtilisateurs = async (searchQuery = '') => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(API_USERS_URL, {
+      const params = new URLSearchParams();
+      if (searchQuery) {
+        params.append('q', searchQuery);
+      }
+      const url = searchQuery ? `${API_USERS_URL}?${params.toString()}` : API_USERS_URL;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -1529,6 +1648,10 @@ export default function AdminDashboard() {
       formData.append('adresse', form.adresse);
       formData.append('montant', form.montant);
       formData.append('statut', form.statut);
+      formData.append('ville', form.ville);
+      formData.append('quartier', form.quartier);
+      formData.append('latitude', form.latitude);
+      formData.append('longitude', form.longitude);
       if (imageFile) {
         formData.append('image', imageFile);
       }
@@ -1586,7 +1709,11 @@ export default function AdminDashboard() {
       numBat: b.numBat,
       adresse: b.adresse,
       montant: String(b.montant),
-      statut: b.statut
+      statut: b.statut,
+      ville: b.ville || '',
+      quartier: b.quartier || '',
+      latitude: b.latitude != null ? String(b.latitude) : '',
+      longitude: b.longitude != null ? String(b.longitude) : ''
     });
     if (b.image) {
       setImagePreview(`data:image/jpeg;base64,${b.image}`);
@@ -1670,7 +1797,7 @@ export default function AdminDashboard() {
 
       if (result.status === 200) {
         setMsg('Utilisateur supprimé avec succès');
-        await loadUtilisateurs();
+        await loadUtilisateurs(searchUser);
       } else {
         setMsg(result.message || 'Erreur lors de la suppression');
       }
@@ -1745,7 +1872,7 @@ export default function AdminDashboard() {
 
       if (result.status === 201 || result.status === 200) {
         setMsg(editingUserId ? 'Utilisateur mis à jour avec succès' : 'Utilisateur créé avec succès');
-        await loadUtilisateurs();
+        await loadUtilisateurs(searchUser);
         resetUserForm();
       } else {
         setMsg(result.message || 'Erreur lors de l\'enregistrement');
@@ -2471,6 +2598,108 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
+                  <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                        Ville
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={60}
+                        value={form.ville}
+                        onChange={e => setForm({ ...form, ville: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          backgroundColor: currentTheme.colors.cardBackground,
+                          color: currentTheme.colors.text,
+                          transition: 'all 0.2s ease',
+                          outline: 'none',
+                          boxShadow: currentTheme.shadows.sm,
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                        Quartier
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={60}
+                        value={form.quartier}
+                        onChange={e => setForm({ ...form, quartier: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          backgroundColor: currentTheme.colors.cardBackground,
+                          color: currentTheme.colors.text,
+                          transition: 'all 0.2s ease',
+                          outline: 'none',
+                          boxShadow: currentTheme.shadows.sm,
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                        Latitude
+                      </label>
+                      <input
+                        type="number"
+                        step="0.000001"
+                        value={form.latitude}
+                        onChange={e => setForm({ ...form, latitude: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          backgroundColor: currentTheme.colors.cardBackground,
+                          color: currentTheme.colors.text,
+                          transition: 'all 0.2s ease',
+                          outline: 'none',
+                          boxShadow: currentTheme.shadows.sm,
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                        Longitude
+                      </label>
+                      <input
+                        type="number"
+                        step="0.000001"
+                        value={form.longitude}
+                        onChange={e => setForm({ ...form, longitude: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          backgroundColor: currentTheme.colors.cardBackground,
+                          color: currentTheme.colors.text,
+                          transition: 'all 0.2s ease',
+                          outline: 'none',
+                          boxShadow: currentTheme.shadows.sm,
+                        }}
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary }}>
                       Image {!editingId && '*'}
@@ -2640,6 +2869,7 @@ export default function AdminDashboard() {
                         transition: 'transform 0.2s ease, box-shadow 0.2s ease',
                         cursor: 'pointer',
                       }}
+                      onClick={() => openBatimentDetails(b)}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-4px)';
                         e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.12)';
@@ -2748,7 +2978,10 @@ export default function AdminDashboard() {
                         {/* Actions */}
                         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                           <button
-                            onClick={() => onEdit(b)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onEdit(b);
+                            }}
                             disabled={loading}
                             style={{
                               flex: 1,
@@ -2774,7 +3007,10 @@ export default function AdminDashboard() {
                             Modifier
                           </button>
                           <button
-                            onClick={() => onDelete(b.numBat)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDelete(b.numBat);
+                            }}
                             disabled={loading}
                             style={{
                               flex: 1,
@@ -2937,15 +3173,14 @@ export default function AdminDashboard() {
                           maxLength={10}
                           value={userForm.matricule}
                           onChange={e => setUserForm({ ...userForm, matricule: e.target.value })}
-                          disabled={!!editingUserId}
                           style={{
                             width: '100%',
                             padding: '10px 12px',
                             border: `1px solid ${currentTheme.colors.border}`,
                             borderRadius: '8px',
                             fontSize: '14px',
-                            backgroundColor: editingUserId ? currentTheme.colors.backgroundTertiary : currentTheme.colors.cardBackground,
-                            color: '#000000'
+                            backgroundColor: currentTheme.colors.cardBackground,
+                            color: currentTheme.colors.text
                           }}
                           required
                         />
@@ -6425,6 +6660,320 @@ export default function AdminDashboard() {
           )}
         </div>
       </main>
+
+      {showBatimentDetails && selectedBatimentDetails && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            zIndex: 1600,
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)'
+          }}
+          onClick={closeBatimentDetails}
+        >
+          <div
+            style={{
+              backgroundColor: currentTheme.colors.cardBackground,
+              border: `1px solid ${currentTheme.colors.border}`,
+              borderRadius: '18px',
+              maxWidth: '720px',
+              width: '100%',
+              maxHeight: '95vh',
+              overflowY: 'auto',
+              boxShadow: currentTheme.shadows.xl,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '24px', borderBottom: `1px solid ${currentTheme.colors.border}` }}>
+              <div>
+                <p style={{ margin: 0, fontSize: '14px', color: currentTheme.colors.textTertiary }}>Bâtiment n° {selectedBatimentDetails.numBat}</p>
+                <h2 style={{ margin: '4px 0 0', fontSize: '28px', color: currentTheme.colors.primary }}>
+                  {selectedBatimentDetails.adresse || 'Adresse non renseignée'}
+                </h2>
+              </div>
+              <button
+                onClick={closeBatimentDetails}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: currentTheme.colors.text,
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  lineHeight: 1,
+                }}
+                aria-label="Fermer les détails du bâtiment"
+              >
+                ×
+              </button>
+            </div>
+
+            {loadingBatimentDetails ? (
+              <div style={{ padding: '48px', textAlign: 'center', color: currentTheme.colors.textTertiary }}>
+                Chargement...
+              </div>
+            ) : (
+              <div style={{ padding: '24px', display: 'grid', gap: '16px' }}>
+                <div
+                  style={{
+                    position: 'relative',
+                    borderRadius: '16px',
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    padding: '12px',
+                    backgroundColor: currentTheme.colors.backgroundSecondary,
+                    overflow: 'hidden',
+                    boxShadow: currentTheme.shadows.sm
+                  }}
+                >
+                  {batimentMapCoords ? (
+                    <MapContainer
+                      key={`${batimentMapCoords.lat}-${batimentMapCoords.lng}`}
+                      center={[batimentMapCoords.lat, batimentMapCoords.lng]}
+                      zoom={16}
+                      scrollWheelZoom={false}
+                      style={{ width: '100%', height: '260px', borderRadius: '12px' }}
+                    >
+                      <TileLayer
+                        attribution='© OpenStreetMap contributors'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+                      <Marker position={[batimentMapCoords.lat, batimentMapCoords.lng]} icon={defaultMarkerIcon}>
+                        <Popup>
+                          Bâtiment n° {selectedBatimentDetails.numBat}
+                        </Popup>
+                      </Marker>
+                    </MapContainer>
+                  ) : (
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '260px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: currentTheme.colors.textTertiary,
+                        fontSize: '14px'
+                      }}
+                    >
+                      Coordonnées géographiques non renseignées
+                    </div>
+                  )}
+                  {batimentMapCoords && (
+                    <button
+                      onClick={() => setShowFullscreenMap(true)}
+                      style={{
+                        position: 'absolute',
+                        right: '16px',
+                        top: '16px',
+                        padding: '8px 14px',
+                        borderRadius: '999px',
+                        border: 'none',
+                        backgroundColor: '#05c46b',
+                        color: '#fff',
+                        fontSize: '12px',
+                        textTransform: 'uppercase',
+                        fontWeight: 600,
+                        letterSpacing: '0.04em',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span style={{ fontSize: '14px' }}>🗺️</span> Voir la map
+                    </button>
+                  )}
+                  {batimentMapCoords && (
+                    <div
+                      style={{
+                        marginTop: '12px',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '12px',
+                        fontSize: '12px',
+                        color: currentTheme.colors.textTertiary
+                      }}
+                    >
+                      <span>Lat: {batimentMapCoords.lat.toFixed(6)} · Lon: {batimentMapCoords.lng.toFixed(6)}</span>
+                      <a
+                        href={`https://www.openstreetmap.org/?mlat=${batimentMapCoords.lat}&mlon=${batimentMapCoords.lng}#map=18/${batimentMapCoords.lat}/${batimentMapCoords.lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: currentTheme.colors.primary, fontWeight: 600 }}
+                      >
+                        Ouvrir dans OpenStreetMap
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    width: '100%',
+                    height: '260px',
+                    borderRadius: '14px',
+                    backgroundColor: '#f2f2f2',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
+                    border: `1px solid ${currentTheme.colors.border}`
+                  }}
+                >
+                  {selectedBatimentDetails.image ? (
+                    <img
+                      src={`data:image/jpeg;base64,${selectedBatimentDetails.image}`}
+                      alt={`Bâtiment ${selectedBatimentDetails.numBat}`}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <div style={{ color: currentTheme.colors.textTertiary, fontSize: '13px' }}>Pas d'image disponible</div>
+                  )}
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Montant</p>
+                    <p style={{ margin: '6px 0 0', fontSize: '18px', color: currentTheme.colors.text, fontWeight: 600 }}>
+                      {typeof selectedBatimentDetails.montant === 'number'
+                        ? `${selectedBatimentDetails.montant.toLocaleString('fr-FR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })} Ar`
+                        : (selectedBatimentDetails.montant ?? 'Non renseigné')}
+                    </p>
+                  </div>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut</p>
+                    <p
+                      style={{
+                        margin: '6px 0 0',
+                        fontSize: '18px',
+                        fontWeight: 600,
+                        color: selectedBatimentDetails.statut ? '#0d6b3a' : '#dc3545'
+                      }}
+                    >
+                      {selectedBatimentDetails.statut ? 'Actif' : 'Inactif'}
+                    </p>
+                  </div>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Ville</p>
+                    <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                      {selectedBatimentDetails.ville || 'Non renseignée'}
+                    </p>
+                  </div>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Quartier</p>
+                    <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                      {selectedBatimentDetails.quartier || 'Non renseigné'}
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ padding: '16px', borderRadius: '12px', border: `1px solid ${currentTheme.colors.border}`, backgroundColor: currentTheme.colors.backgroundSecondary }}>
+                  <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: currentTheme.colors.text }}>Informations complémentaires</p>
+                  <p style={{ margin: '8px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    Numéro du bâtiment : {selectedBatimentDetails.numBat}
+                  </p>
+                  <p style={{ margin: '6px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    Adresse : {selectedBatimentDetails.adresse || 'Non renseignée'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                  <button
+                    onClick={closeBatimentDetails}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      backgroundColor: currentTheme.colors.backgroundSecondary,
+                      color: currentTheme.colors.text,
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    Fermer
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showFullscreenMap && batimentMapCoords && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000
+          }}
+          onClick={() => setShowFullscreenMap(false)}
+        >
+          <div
+            style={{
+              width: '90%',
+              maxWidth: '960px',
+              height: '90%',
+              borderRadius: '20px',
+              backgroundColor: currentTheme.colors.cardBackground,
+              padding: '18px',
+              boxShadow: currentTheme.shadows.xl,
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ margin: 0, color: currentTheme.colors.primary }}>Carte du bâtiment {selectedBatimentDetails.numBat}</h3>
+              <button
+                onClick={() => setShowFullscreenMap(false)}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: currentTheme.colors.textTertiary
+                }}
+                aria-label="Fermer la carte plein écran"
+              >
+                ×
+              </button>
+            </div>
+
+            <MapContainer
+              center={[batimentMapCoords.lat, batimentMapCoords.lng]}
+              zoom={17}
+              scrollWheelZoom
+              style={{ flex: 1, borderRadius: '16px', border: `1px solid ${currentTheme.colors.border}` }}
+            >
+              <TileLayer
+                attribution='© OpenStreetMap contributors'
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              />
+              <Marker position={[batimentMapCoords.lat, batimentMapCoords.lng]} icon={defaultMarkerIcon}>
+                <Popup>
+                  Bâtiment n° {selectedBatimentDetails.numBat}
+                </Popup>
+              </Marker>
+            </MapContainer>
+          </div>
+        </div>
+      )}
 
       {/* Modal Convention - Seulement pour modifier (pas de création pour l'admin) */}
       {showConventionModal && selectedConvention && (

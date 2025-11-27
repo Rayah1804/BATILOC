@@ -200,6 +200,17 @@ export default function AuthForm() {
                   className="password-toggle"
                   onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  title={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  style={{
+                    zIndex: 10,
+                    padding: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '28px',
+                    minHeight: '28px',
+                    borderRadius: '4px'
+                  }}
                 >
                   {showPassword ? (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

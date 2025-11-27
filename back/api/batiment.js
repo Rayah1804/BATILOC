@@ -8,6 +8,21 @@ const multer = require("multer");
 const path = require("path");
 const { validateBatiment } = require("../middleware/validator");
 
+const sanitizeStringField = (value, maxLength) => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.substring(0, maxLength);
+};
+
+const parseCoordinateField = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 // Configuration de multer pour stocker les images en mémoire
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -200,7 +215,11 @@ router.get("/:numBat", async (req, res) => {
 // CREATE - Créer un nouveau bâtiment
 router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
   try {
-    const { numBat, adresse, montant, statut } = req.body;
+    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
+    const villeValue = sanitizeStringField(ville, 60);
+    const quartierValue = sanitizeStringField(quartier, 60);
+    const latitudeValue = parseCoordinateField(latitude);
+    const longitudeValue = parseCoordinateField(longitude);
 
     // Validation des champs
     if (!numBat || !adresse || !montant) {
@@ -231,6 +250,10 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
       numBat: parseInt(numBat),
       image: req.file.buffer,
       adresse: adresse.substring(0, 20), // Limiter à 20 caractères
+      ville: villeValue,
+      quartier: quartierValue,
+      latitude: latitudeValue,
+      longitude: longitudeValue,
       montant: parseFloat(montant),
       statut: statut !== undefined ? (statut === 'true' || statut === true || statut === 1) : true
     });
@@ -259,7 +282,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
 router.put("/:numBat", upload.single('image'), async (req, res) => {
   try {
     const { numBat } = req.params;
-    const { adresse, montant, statut } = req.body;
+    const { adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
 
     // Trouver le bâtiment
     const batiment = await MbatimentModel.findByPk(numBat);
@@ -276,6 +299,18 @@ router.put("/:numBat", upload.single('image'), async (req, res) => {
     if (montant !== undefined) updateData.montant = parseFloat(montant);
     if (statut !== undefined) {
       updateData.statut = (statut === 'true' || statut === true || statut === 1);
+    }
+    if (ville !== undefined) {
+      updateData.ville = sanitizeStringField(ville, 60);
+    }
+    if (quartier !== undefined) {
+      updateData.quartier = sanitizeStringField(quartier, 60);
+    }
+    if (latitude !== undefined) {
+      updateData.latitude = parseCoordinateField(latitude);
+    }
+    if (longitude !== undefined) {
+      updateData.longitude = parseCoordinateField(longitude);
     }
     if (req.file) {
       updateData.image = req.file.buffer;

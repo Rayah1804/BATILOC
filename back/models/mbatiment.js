@@ -15,6 +15,22 @@ module.exports = function(sequelize, DataTypes) {
       type: DataTypes.STRING(20),
       allowNull: false
     },
+    ville: {
+      type: DataTypes.STRING(60),
+      allowNull: true
+    },
+    quartier: {
+      type: DataTypes.STRING(60),
+      allowNull: true
+    },
+    latitude: {
+      type: DataTypes.DOUBLE,
+      allowNull: true
+    },
+    longitude: {
+      type: DataTypes.DOUBLE,
+      allowNull: true
+    },
     montant: {
       type: DataTypes.DOUBLE,
       allowNull: false

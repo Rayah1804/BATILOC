@@ -7,10 +7,12 @@ const bcrypt = require("bcryptjs")
 const webToken = require("jsonwebtoken")
 const fs = require('fs');
 const path = require('path');
+const { authenticateToken, requireRole } = require("../middleware/auth");
 require("dotenv").config()
 
 // Liste des postes autorisés
 const POSTES_AUTORISES = ['caissier', 'administrateur', 'opérateur de saisie'];
+const ensureAdmin = [authenticateToken, requireRole('administrateur')];
 
 // Vérifier que la clé secrète existe
 const SECRET_KEY = process.env.secret_key || process.env.SECRET_KEY || 'your_secret_key_change_me';
@@ -21,7 +23,7 @@ if (!process.env.secret_key && !process.env.SECRET_KEY) {
 }
 
 // READ - Obtenir tous les utilisateurs (sans mot de passe) avec recherche
-router.get("/", async (req, res) => {
+router.get("/", ...ensureAdmin, async (req, res) => {
   try {
     const { q } = req.query;
     const where = {};
@@ -71,8 +73,8 @@ router.get("/", async (req, res) => {
   }
 });
 
-//S'INSCRIRE
-router.post("/register", async (req, res) => {
+//S'INSCRIRE (réservé à l'administrateur)
+router.post("/register", ...ensureAdmin, async (req, res) => {
     try {
         const { matricule, nom, contact, email, mdp, poste, numConv } = req.body;
         
@@ -110,38 +112,6 @@ router.post("/register", async (req, res) => {
                 message: "Email déjà utilisé ou matricule",
                 status: 409
             });
-        }
-
-        // Vérifier la limitation à 3 utilisateurs par poste
-        const userCount = await UserModel.count({
-            where: {
-                poste: poste.toLowerCase()
-            }
-        });
-
-        const MAX_USERS_PER_POSTE = 3;
-        if (userCount >= MAX_USERS_PER_POSTE) {
-            console.log(`❌ Limite d'utilisateurs atteinte pour le poste ${poste} (${userCount}/${MAX_USERS_PER_POSTE})`);
-            
-            // Exception pour les administrateurs - permettre toujours la création d'un admin de secours
-            if (poste.toLowerCase() !== 'administrateur') {
-                return res.status(403).json({
-                    message: `Limite d'utilisateurs atteinte pour ce poste (${MAX_USERS_PER_POSTE} maximum). Veuillez contacter l'administrateur.`,
-                    status: 403,
-                    currentCount: userCount,
-                    maxAllowed: MAX_USERS_PER_POSTE
-                });
-            } else {
-                // Pour les admins, permettre un admin supplémentaire comme sauvegarde
-                if (userCount >= 4) {
-                    return res.status(403).json({
-                        message: `Limite d'administrateurs atteinte (4 maximum pour la sécurité). Veuillez contacter le support.`,
-                        status: 403,
-                        currentCount: userCount,
-                        maxAllowed: 4
-                    });
-                }
-            }
         }
 
         // Hasher le mot de passe
@@ -397,22 +367,38 @@ router.get("/profile", (req, res) => {
 })
 
 // UPDATE - Mettre à jour un utilisateur (admin seulement)
-router.put("/:matricule", async (req, res) => {
+router.put("/:matricule", ...ensureAdmin, async (req, res) => {
+    const transaction = await sequelize.transaction();
     try {
         const { matricule } = req.params;
-        const { nom, contact, email, poste, mdp, numConv } = req.body;
+        const { matricule: newMatricule, nom, contact, email, poste, mdp, numConv } = req.body;
 
         // Vérifier si l'utilisateur existe
-        const user = await UserModel.findByPk(matricule);
+        const user = await UserModel.findByPk(matricule, { transaction });
         if (!user) {
+            await transaction.rollback();
             return res.status(404).json({
                 message: "Utilisateur non trouvé",
                 status: 404
             });
         }
 
+        // Si le matricule change, vérifier qu'il n'existe pas déjà
+        const matriculeChange = newMatricule && newMatricule !== matricule;
+        if (matriculeChange) {
+            const existingMatricule = await UserModel.findByPk(newMatricule, { transaction });
+            if (existingMatricule) {
+                await transaction.rollback();
+                return res.status(409).json({
+                    message: "Ce matricule est déjà utilisé par un autre utilisateur",
+                    status: 409
+                });
+            }
+        }
+
         // Validation du poste si fourni
         if (poste && !POSTES_AUTORISES.includes(poste.toLowerCase())) {
+            await transaction.rollback();
             return res.status(400).json({
                 message: "Poste invalide. Les postes autorisés sont : caissier, administrateur, opérateur de saisie",
                 status: 400
@@ -425,9 +411,11 @@ router.put("/:matricule", async (req, res) => {
                 where: { 
                     email: email,
                     matricule: { [Op.ne]: matricule }
-                }
+                },
+                transaction
             });
             if (existingUser) {
+                await transaction.rollback();
                 return res.status(409).json({
                     message: "Cet email est déjà utilisé par un autre utilisateur",
                     status: 409
@@ -441,9 +429,11 @@ router.put("/:matricule", async (req, res) => {
                 where: { 
                     contact: contact,
                     matricule: { [Op.ne]: matricule }
-                }
+                },
+                transaction
             });
             if (existingUser) {
+                await transaction.rollback();
                 return res.status(409).json({
                     message: "Ce contact est déjà utilisé par un autre utilisateur",
                     status: 409
@@ -451,36 +441,72 @@ router.put("/:matricule", async (req, res) => {
             }
         }
 
-        // Préparer les données de mise à jour
-        const updateData = {};
-        if (nom) updateData.nom = nom;
-        if (contact) updateData.contact = contact;
-        if (email) updateData.email = email;
-        if (poste) updateData.poste = poste.toLowerCase();
-        if (numConv !== undefined) updateData.numConv = numConv || null;
-        
-        // Hasher le mot de passe si fourni
-        if (mdp) {
-            const salt = await bcrypt.genSalt(10);
-            updateData.mdp = await bcrypt.hash(mdp, salt);
+        // Si le matricule change, créer un nouvel utilisateur et supprimer l'ancien
+        if (matriculeChange) {
+            // Préparer les données pour le nouvel utilisateur
+            const newUserData = {
+                matricule: newMatricule,
+                nom: nom || user.nom,
+                contact: contact || user.contact,
+                email: email || user.email,
+                poste: poste ? poste.toLowerCase() : user.poste,
+                numConv: numConv !== undefined ? (numConv || null) : user.numConv,
+                mdp: mdp ? (await bcrypt.hash(mdp, await bcrypt.genSalt(10))) : user.mdp
+            };
+
+            // Créer le nouvel utilisateur
+            const newUser = await UserModel.create(newUserData, { transaction });
+
+            // Supprimer l'ancien utilisateur
+            await user.destroy({ transaction });
+
+            await transaction.commit();
+
+            // Récupérer l'utilisateur créé (sans mot de passe)
+            const createdUser = await UserModel.findByPk(newMatricule, {
+                attributes: ['matricule', 'nom', 'contact', 'email', 'poste', 'numConv']
+            });
+
+            console.log('✅ Utilisateur mis à jour avec nouveau matricule:', newMatricule);
+            return res.status(200).json({
+                message: "Utilisateur mis à jour avec succès",
+                status: 200,
+                data: createdUser
+            });
+        } else {
+            // Matricule inchangé, mise à jour normale
+            const updateData = {};
+            if (nom) updateData.nom = nom;
+            if (contact) updateData.contact = contact;
+            if (email) updateData.email = email;
+            if (poste) updateData.poste = poste.toLowerCase();
+            if (numConv !== undefined) updateData.numConv = numConv || null;
+            
+            // Hasher le mot de passe si fourni
+            if (mdp) {
+                const salt = await bcrypt.genSalt(10);
+                updateData.mdp = await bcrypt.hash(mdp, salt);
+            }
+
+            // Mettre à jour l'utilisateur
+            await user.update(updateData, { transaction });
+            await transaction.commit();
+
+            // Récupérer l'utilisateur mis à jour (sans mot de passe)
+            const updatedUser = await UserModel.findByPk(matricule, {
+                attributes: ['matricule', 'nom', 'contact', 'email', 'poste', 'numConv']
+            });
+
+            console.log('✅ Utilisateur mis à jour:', matricule);
+            return res.status(200).json({
+                message: "Utilisateur mis à jour avec succès",
+                status: 200,
+                data: updatedUser
+            });
         }
 
-        // Mettre à jour l'utilisateur
-        await user.update(updateData);
-
-        // Récupérer l'utilisateur mis à jour (sans mot de passe)
-        const updatedUser = await UserModel.findByPk(matricule, {
-            attributes: ['matricule', 'nom', 'contact', 'email', 'poste', 'numConv']
-        });
-
-        console.log('✅ Utilisateur mis à jour:', matricule);
-        return res.status(200).json({
-            message: "Utilisateur mis à jour avec succès",
-            status: 200,
-            data: updatedUser
-        });
-
     } catch (err) {
+        await transaction.rollback();
         console.error('❌ Erreur mise à jour utilisateur:', err);
         return res.status(500).json({
             message: "Erreur serveur",
@@ -491,7 +517,7 @@ router.put("/:matricule", async (req, res) => {
 });
 
 // DELETE - Supprimer un utilisateur (admin seulement)
-router.delete("/:matricule", async (req, res) => {
+router.delete("/:matricule", ...ensureAdmin, async (req, res) => {
     try {
         const { matricule } = req.params;
 
@@ -562,7 +588,7 @@ const sauvegarderDemandes = (demandes) => {
 };
 
 // GET - Obtenir toutes les demandes de création de compte (admin seulement)
-router.get("/demandes-creation", async (req, res) => {
+router.get("/demandes-creation", ...ensureAdmin, async (req, res) => {
     try {
         const demandes = lireDemandes();
         
@@ -595,7 +621,7 @@ router.get("/demandes-creation", async (req, res) => {
 });
 
 // PUT - Approuver ou rejeter une demande de création de compte (admin seulement)
-router.put("/demandes-creation/:id", async (req, res) => {
+router.put("/demandes-creation/:id", ...ensureAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { action, nom, contact, email } = req.body; // nom, contact, email requis pour l'approbation
@@ -670,23 +696,6 @@ router.put("/demandes-creation/:id", async (req, res) => {
                 });
             }
 
-            // Vérifier la limitation à 3 utilisateurs par poste lors de l'approbation
-            const userCount = await UserModel.count({
-                where: {
-                    poste: demande.poste.toLowerCase()
-                }
-            });
-
-            const MAX_USERS_PER_POSTE = 3;
-            if (demande.poste.toLowerCase() !== 'administrateur' && userCount >= MAX_USERS_PER_POSTE) {
-                return res.status(403).json({
-                    message: `Impossible d'approuver cette demande : limite d'utilisateurs atteinte pour ce poste (${MAX_USERS_PER_POSTE} maximum)`,
-                    status: 403,
-                    currentCount: userCount,
-                    maxAllowed: MAX_USERS_PER_POSTE
-                });
-            }
-            
             // Hasher le mot de passe
             const salt = await bcrypt.genSalt(10);
             const hash = await bcrypt.hash(demande.mdp, salt);
@@ -994,8 +1003,8 @@ router.post("/reset-password/verify", async (req, res) => {
     }
 });
 
-// POST - Vérifier si un utilisateur peut créer un compte (vérification limitation)
-router.post("/check-user-limit", async (req, res) => {
+// POST - Vérifier si un utilisateur peut créer un compte (réservé à l'administrateur)
+router.post("/check-user-limit", ...ensureAdmin, async (req, res) => {
     try {
         const { poste } = req.body;
 
@@ -1013,17 +1022,13 @@ router.post("/check-user-limit", async (req, res) => {
             }
         });
 
-        // Limite de 3 utilisateurs par poste (vous pouvez ajuster cette valeur)
-        const MAX_USERS_PER_POSTE = 3;
-        const canCreate = userCount < MAX_USERS_PER_POSTE;
-
         return res.status(200).json({
-            message: canCreate ? "Création de compte autorisée" : "Limite d'utilisateurs atteinte",
+            message: "Création de compte autorisée",
             status: 200,
-            canCreate: canCreate,
+            canCreate: true,
             currentCount: userCount,
-            maxAllowed: MAX_USERS_PER_POSTE,
-            remaining: Math.max(0, MAX_USERS_PER_POSTE - userCount)
+            maxAllowed: null,
+            remaining: null
         });
 
     } catch (err) {
@@ -1171,7 +1176,7 @@ router.post("/reset-password/request-demand", async (req, res) => {
 });
 
 // GET - Obtenir toutes les demandes de réinitialisation (admin seulement)
-router.get("/reset-password/demandes", async (req, res) => {
+router.get("/reset-password/demandes", ...ensureAdmin, async (req, res) => {
     try {
         const demandes = lireDemandesReset();
         
@@ -1191,7 +1196,7 @@ router.get("/reset-password/demandes", async (req, res) => {
 });
 
 // PUT - Approuver ou rejeter une demande de réinitialisation (admin seulement)
-router.put("/reset-password/demandes/:id", async (req, res) => {
+router.put("/reset-password/demandes/:id", ...ensureAdmin, async (req, res) => {
     try {
         const { id } = req.params;
         const { action, newPassword } = req.body;
