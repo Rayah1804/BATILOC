@@ -1405,7 +1405,6 @@ export default function RedacteurHome() {
         marginLeft: '280px', 
         padding: '32px', 
         backgroundColor: currentTheme.colors.background,
-        marginLeft: '280px',
         width: 'calc(100% - 280px)',
         overflowY: 'auto',
         height: '100vh',

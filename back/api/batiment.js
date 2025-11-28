@@ -81,11 +81,10 @@ router.get("/", async (req, res) => {
       where[Op.or] = searchConditions;
     }
 
-    // Si le paramètre "available" est présent, filtrer les bâtiments déjà utilisés par d'autres clients
+    // Si le paramètre "available" est présent, filtrer les bâtiments déjà utilisés ET les bâtiments inactifs
     if (available === 'true' || available === true) {
       try {
-        // Récupérer tous les numBat qui ont déjà une convention (peu importe le statut)
-        // On vérifie TOUTES les conventions existantes dans la base de données
+        // Exclusion 1: Récupérer tous les numBat qui ont déjà une convention (peu importe le statut)
         const conventions = await Convention.findAll({
           attributes: ['numBat'],
           raw: true
@@ -94,7 +93,6 @@ router.get("/", async (req, res) => {
         console.log(`🔍 Recherche de bâtiments disponibles: ${conventions.length} convention(s) trouvée(s)`);
         
         // Extraire les numBat uniques qui ont déjà des conventions
-        // Filtrer les valeurs null/undefined au cas où
         const excludedBatIds = [...new Set(conventions
           .map(c => c.numBat)
           .filter(numBat => numBat != null && numBat !== undefined)
@@ -102,14 +100,22 @@ router.get("/", async (req, res) => {
         
         console.log(`🚫 Bâtiments exclus (déjà utilisés): ${excludedBatIds.length} - [${excludedBatIds.join(', ')}]`);
         
-        // Exclure ces bâtiments de la recherche
+        // Exclusion 2: Les bâtiments inactifs (statut = false) ne doivent pas être allouables
+        // Construire les conditions d'exclusion
+        const exclusionConditions = [];
+        
+        // Exclure les bâtiments déjà utilisés
         if (excludedBatIds.length > 0) {
-          // Créer la condition d'exclusion
-          const exclusionCondition = { numBat: { [Op.notIn]: excludedBatIds } };
-          
+          exclusionConditions.push({ numBat: { [Op.notIn]: excludedBatIds } });
+        }
+        
+        // Exclure les bâtiments inactifs (statut = false)
+        exclusionConditions.push({ statut: true });
+        
+        // Combiner toutes les conditions d'exclusion
+        if (exclusionConditions.length > 0) {
           // Si where contient déjà des conditions, les combiner avec Op.and
           if (Object.keys(where).length > 0) {
-            // Créer un nouveau where avec Op.and pour combiner toutes les conditions
             const existingConditions = [];
             
             // Ajouter les conditions existantes (statut, Op.or, etc.)
@@ -123,16 +129,17 @@ router.get("/", async (req, res) => {
               }
             });
             
-            // Ajouter la condition d'exclusion
-            existingConditions.push(exclusionCondition);
+            // Ajouter toutes les conditions d'exclusion
+            existingConditions.push(...exclusionConditions);
             
             // Réinitialiser where avec Op.and
             Object.keys(where).forEach(key => delete where[key]);
             where[Op.and] = existingConditions;
           } else {
-            // Pas de conditions existantes, ajouter simplement l'exclusion
-            where.numBat = exclusionCondition.numBat;
+            // Pas de conditions existantes, utiliser Op.and pour toutes les exclusions
+            where[Op.and] = exclusionConditions;
           }
+          console.log(`✅ Filtrage appliqué: exclus ${excludedBatIds.length} bâtiment(s) utilisés + tous les bâtiments inactifs`);
         } else {
           console.log('✅ Aucun bâtiment exclu - tous les bâtiments sont disponibles');
         }
@@ -142,19 +149,74 @@ router.get("/", async (req, res) => {
       }
     }
 
-    const { count, rows } = await MbatimentModel.findAndCountAll({
-      where,
-      limit,
-      offset,
-      order: [['numBat', 'DESC']]
+    // Récupérer les bâtiments
+    // Utiliser raw: false pour éviter les problèmes avec les colonnes qui n'existent pas encore
+    let result;
+    try {
+      result = await MbatimentModel.findAndCountAll({
+        where,
+        limit,
+        offset,
+        order: [['numBat', 'DESC']],
+        raw: false
+      });
+    } catch (error) {
+      // Si l'erreur est due à une colonne manquante, essayer avec raw: true et sélectionner uniquement les colonnes existantes
+      if (error.message && (error.message.includes('motifInactivite') || error.message.includes('Unknown column'))) {
+        console.warn('⚠️ Colonne motifInactivite manquante. Utilisation des colonnes de base uniquement.');
+        result = await MbatimentModel.findAndCountAll({
+          where,
+          limit,
+          offset,
+          order: [['numBat', 'DESC']],
+          attributes: ['numBat', 'image', 'adresse', 'ville', 'quartier', 'latitude', 'longitude', 'montant', 'statut'],
+          raw: false
+        });
+      } else {
+        throw error;
+      }
+    }
+    const { count, rows } = result;
+    
+    // Récupérer tous les numBat qui ont des conventions actives (statutConv = true)
+    const conventionsActives = await Convention.findAll({
+      where: {
+        statutConv: true
+      },
+      attributes: ['numBat'],
+      raw: true
     });
     
-    // Convertir les images BLOB en base64 pour l'envoi
+    const batimentsAlloues = new Set(conventionsActives.map(c => c.numBat));
+    
+    // Convertir les images BLOB en base64 et ajouter le statut d'utilisation
     const batimentsWithImages = rows.map(b => {
       const batiment = b.toJSON();
       if (batiment.image) {
         batiment.image = batiment.image.toString('base64');
       }
+      
+      // Initialiser motifInactivite si absent (pour compatibilité avec les anciennes bases de données)
+      if (batiment.motifInactivite === undefined || batiment.motifInactivite === null) {
+        batiment.motifInactivite = null;
+      }
+      
+      // Déterminer le statut d'utilisation
+      // Si le bâtiment est inactif, il ne peut pas être libre ni alloué
+      if (!batiment.statut) {
+        batiment.statutUtilisation = 'indisponible';
+        batiment.estLibre = false;
+        batiment.estAlloue = false;
+        batiment.estIndisponible = true;
+      } else {
+        // Si le bâtiment est actif, vérifier s'il est alloué
+        const estAlloue = batimentsAlloues.has(batiment.numBat);
+        batiment.statutUtilisation = estAlloue ? 'alloué' : 'libre';
+        batiment.estLibre = !estAlloue;
+        batiment.estAlloue = estAlloue;
+        batiment.estIndisponible = false;
+      }
+      
       return batiment;
     });
 
@@ -196,6 +258,11 @@ router.get("/:numBat", async (req, res) => {
     if (batimentData.image) {
       batimentData.image = batimentData.image.toString('base64');
     }
+    
+    // Initialiser motifInactivite si absent (pour compatibilité avec les anciennes bases de données)
+    if (batimentData.motifInactivite === undefined || batimentData.motifInactivite === null) {
+      batimentData.motifInactivite = null;
+    }
 
     res.status(200).json({
       message: "Bâtiment récupéré avec succès",
@@ -215,7 +282,7 @@ router.get("/:numBat", async (req, res) => {
 // CREATE - Créer un nouveau bâtiment
 router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
   try {
-    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
+    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude, motifInactivite } = req.body;
     const villeValue = sanitizeStringField(ville, 60);
     const quartierValue = sanitizeStringField(quartier, 60);
     const latitudeValue = parseCoordinateField(latitude);
@@ -225,6 +292,15 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
     if (!numBat || !adresse || !montant) {
       return res.status(400).json({
         message: "Veuillez remplir tous les champs obligatoires (numBat, adresse, montant)",
+        status: 400
+      });
+    }
+    
+    // Validation: si le statut est inactif (false), le motif d'inactivité est obligatoire
+    const statutValue = statut !== undefined ? (statut === 'true' || statut === true || statut === 1) : true;
+    if (!statutValue && (!motifInactivite || motifInactivite.trim() === '')) {
+      return res.status(400).json({
+        message: "Le motif d'inactivité est obligatoire lorsque le statut est inactif",
         status: 400
       });
     }
@@ -255,7 +331,8 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
       latitude: latitudeValue,
       longitude: longitudeValue,
       montant: parseFloat(montant),
-      statut: statut !== undefined ? (statut === 'true' || statut === true || statut === 1) : true
+      statut: statutValue,
+      motifInactivite: statutValue ? null : (motifInactivite ? motifInactivite.trim() : null)
     });
 
     const batimentData = newBatiment.toJSON();
@@ -282,7 +359,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
 router.put("/:numBat", upload.single('image'), async (req, res) => {
   try {
     const { numBat } = req.params;
-    const { adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
+    const { adresse, montant, statut, ville, quartier, latitude, longitude, motifInactivite } = req.body;
 
     // Trouver le bâtiment
     const batiment = await MbatimentModel.findByPk(numBat);
@@ -297,9 +374,41 @@ router.put("/:numBat", upload.single('image'), async (req, res) => {
     const updateData = {};
     if (adresse) updateData.adresse = adresse.substring(0, 20);
     if (montant !== undefined) updateData.montant = parseFloat(montant);
+    
+    // Gérer le statut et le motif d'inactivité
     if (statut !== undefined) {
-      updateData.statut = (statut === 'true' || statut === true || statut === 1);
+      const newStatutValue = (statut === 'true' || statut === true || statut === 1);
+      updateData.statut = newStatutValue;
+      
+      // Validation: si le statut devient inactif, le motif d'inactivité est obligatoire
+      if (!newStatutValue && (!motifInactivite || motifInactivite.trim() === '')) {
+        return res.status(400).json({
+          message: "Le motif d'inactivité est obligatoire lorsque le statut est inactif",
+          status: 400
+        });
+      }
+      
+      // Si le statut devient actif, on efface le motif d'inactivité
+      if (newStatutValue) {
+        updateData.motifInactivite = null;
+      } else if (motifInactivite !== undefined) {
+        updateData.motifInactivite = motifInactivite.trim();
+      }
+    } else if (motifInactivite !== undefined) {
+      // Si seul le motif change sans changer le statut
+      // Vérifier que le bâtiment n'est pas actif
+      const currentStatut = batiment.statut;
+      if (!currentStatut) {
+        if (!motifInactivite || motifInactivite.trim() === '') {
+          return res.status(400).json({
+            message: "Le motif d'inactivité est obligatoire pour un bâtiment inactif",
+            status: 400
+          });
+        }
+        updateData.motifInactivite = motifInactivite.trim();
+      }
     }
+    
     if (ville !== undefined) {
       updateData.ville = sanitizeStringField(ville, 60);
     }

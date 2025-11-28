@@ -18,6 +18,7 @@ const initialForm = {
   adresse: '',
   montant: '',
   statut: true,
+  motifInactivite: '',
   ville: '',
   quartier: '',
   latitude: '',
@@ -96,6 +97,7 @@ export default function AdminDashboard() {
   const [searchUser, setSearchUser] = useState('');
   const [filterPoste, setFilterPoste] = useState('all');
   const [filterStatut, setFilterStatut] = useState('all');
+  const [filterStatutUtilisation, setFilterStatutUtilisation] = useState('all');
   
   // États pour les paramètres
   const [adminProfile, setAdminProfile] = useState({
@@ -807,10 +809,12 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadBatimentsForConvention = async () => {
+  const loadBatimentsForConvention = async (onlyAvailable = false) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(API_URL, {
+      // Si onlyAvailable est true, charger uniquement les bâtiments libres (non alloués)
+      const url = onlyAvailable ? `${API_URL}?available=true` : API_URL;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -1635,6 +1639,13 @@ export default function AdminDashboard() {
       return;
     }
 
+    // Validation: si le statut est inactif, le motif d'inactivité est obligatoire
+    if (!form.statut && (!form.motifInactivite || form.motifInactivite.trim() === '')) {
+      setMsg('Le motif d\'inactivité est obligatoire lorsque le statut est inactif');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+
     if (!editingId && !imageFile) {
       setMsg('Veuillez sélectionner une image');
       setTimeout(() => setMsg(''), 2000);
@@ -1648,6 +1659,9 @@ export default function AdminDashboard() {
       formData.append('adresse', form.adresse);
       formData.append('montant', form.montant);
       formData.append('statut', form.statut);
+      if (form.motifInactivite) {
+        formData.append('motifInactivite', form.motifInactivite);
+      }
       formData.append('ville', form.ville);
       formData.append('quartier', form.quartier);
       formData.append('latitude', form.latitude);
@@ -1710,6 +1724,7 @@ export default function AdminDashboard() {
       adresse: b.adresse,
       montant: String(b.montant),
       statut: b.statut,
+      motifInactivite: b.motifInactivite || '',
       ville: b.ville || '',
       quartier: b.quartier || '',
       latitude: b.latitude != null ? String(b.latitude) : '',
@@ -1840,7 +1855,8 @@ export default function AdminDashboard() {
       if (!body.numConv) body.numConv = null;
 
       if (editingUserId) {
-        // UPDATE
+        // UPDATE - Ne pas envoyer le matricule car il ne peut pas être modifié
+        delete body.matricule;
         response = await fetch(`${API_USERS_URL}/${editingUserId}`, {
           method: 'PUT',
           headers: {
@@ -1894,7 +1910,11 @@ export default function AdminDashboard() {
     const matchesStatut = filterStatut === 'all' || 
       (filterStatut === 'actif' && b.statut) || 
       (filterStatut === 'inactif' && !b.statut);
-    return matchesSearch && matchesStatut;
+    const matchesStatutUtilisation = filterStatutUtilisation === 'all' ||
+      (filterStatutUtilisation === 'libre' && (b.statutUtilisation === 'libre' || b.estLibre) && !(b.statutUtilisation === 'indisponible' || b.estIndisponible)) ||
+      (filterStatutUtilisation === 'alloue' && (b.statutUtilisation === 'alloué' || b.estAlloue)) ||
+      (filterStatutUtilisation === 'indisponible' && (b.statutUtilisation === 'indisponible' || b.estIndisponible));
+    return matchesSearch && matchesStatut && matchesStatutUtilisation;
   });
 
   const filteredUtilisateurs = utilisateurs.filter(u => {
@@ -2463,6 +2483,26 @@ export default function AdminDashboard() {
                     <option value="inactif">Inactifs</option>
                   </select>
                 </div>
+                <div>
+                  <select
+                    value={filterStatutUtilisation}
+                    onChange={e => setFilterStatutUtilisation(e.target.value)}
+                    style={{
+                      padding: '10px 12px',
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      backgroundColor: currentTheme.colors.cardBackground,
+                      color: currentTheme.colors.text
+                    }}
+                  >
+                    <option value="all">Tous (utilisation)</option>
+                    <option value="libre">🟢 Libres</option>
+                    <option value="alloue">🔴 Déjà alloués</option>
+                    <option value="indisponible">⛔ Indisponibles</option>
+                  </select>
+                </div>
               </div>
 
               {/* Formulaire */}
@@ -2698,6 +2738,69 @@ export default function AdminDashboard() {
                         disabled={loading}
                       />
                     </div>
+                  </div>
+
+                  {/* Statut et Motif d'inactivité */}
+                  <div style={{ display: 'grid', gap: '16px', gridTemplateColumns: '1fr 2fr' }}>
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                        Statut *
+                      </label>
+                      <select
+                        value={form.statut ? 'true' : 'false'}
+                        onChange={e => {
+                          const newStatut = e.target.value === 'true';
+                          setForm({ 
+                            ...form, 
+                            statut: newStatut,
+                            // Si le statut devient actif, effacer le motif
+                            motifInactivite: newStatut ? '' : form.motifInactivite
+                          });
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          border: `1px solid ${currentTheme.colors.border}`,
+                          borderRadius: '8px',
+                          fontSize: '14px',
+                          backgroundColor: currentTheme.colors.cardBackground,
+                          color: currentTheme.colors.text,
+                          cursor: 'pointer'
+                        }}
+                        disabled={loading}
+                        required
+                      >
+                        <option value="true">Actif</option>
+                        <option value="false">Inactif</option>
+                      </select>
+                    </div>
+
+                    {!form.statut && (
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
+                          Motif d'inactivité {!form.statut && <span style={{ color: '#ef4444' }}>*</span>}
+                        </label>
+                        <textarea
+                          value={form.motifInactivite}
+                          onChange={e => setForm({ ...form, motifInactivite: e.target.value })}
+                          placeholder="Ex: Réparation en cours, Démolition prévue..."
+                          style={{
+                            width: '100%',
+                            padding: '10px 12px',
+                            border: `1px solid ${currentTheme.colors.border}`,
+                            borderRadius: '8px',
+                            fontSize: '14px',
+                            backgroundColor: currentTheme.colors.cardBackground,
+                            color: currentTheme.colors.text,
+                            minHeight: '80px',
+                            resize: 'vertical',
+                            fontFamily: 'inherit'
+                          }}
+                          disabled={loading}
+                          required={!form.statut}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -2958,8 +3061,9 @@ export default function AdminDashboard() {
                           </span>
                         </p>
 
-                        {/* Statut */}
-                        <div style={{ marginBottom: '16px' }}>
+                        {/* Statut d'utilisation */}
+                        <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          {/* Statut technique (Actif/Inactif) */}
                           <span
                             style={{
                               display: 'inline-block',
@@ -2972,6 +3076,33 @@ export default function AdminDashboard() {
                             }}
                           >
                             {b.statut ? '✓ Actif' : '✗ Inactif'}
+                          </span>
+                          
+                          {/* Statut d'utilisation (Libre/Alloué/Indisponible) */}
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: '600',
+                              backgroundColor: b.statutUtilisation === 'indisponible' || b.estIndisponible 
+                                ? '#fee2e2' 
+                                : (b.statutUtilisation === 'libre' || b.estLibre) 
+                                  ? '#e0f2fe' 
+                                  : '#fef3c7',
+                              color: b.statutUtilisation === 'indisponible' || b.estIndisponible 
+                                ? '#991b1b' 
+                                : (b.statutUtilisation === 'libre' || b.estLibre) 
+                                  ? '#0369a1' 
+                                  : '#b45309',
+                            }}
+                          >
+                            {b.statutUtilisation === 'indisponible' || b.estIndisponible 
+                              ? '⛔ Indisponible' 
+                              : (b.statutUtilisation === 'libre' || b.estLibre) 
+                                ? '🟢 Libre' 
+                                : '🔴 Déjà alloué'}
                           </span>
                         </div>
 
@@ -3173,17 +3304,24 @@ export default function AdminDashboard() {
                           maxLength={10}
                           value={userForm.matricule}
                           onChange={e => setUserForm({ ...userForm, matricule: e.target.value })}
+                          disabled={!!editingUserId}
                           style={{
                             width: '100%',
                             padding: '10px 12px',
                             border: `1px solid ${currentTheme.colors.border}`,
                             borderRadius: '8px',
                             fontSize: '14px',
-                            backgroundColor: currentTheme.colors.cardBackground,
-                            color: currentTheme.colors.text
+                            backgroundColor: editingUserId ? currentTheme.colors.backgroundTertiary : currentTheme.colors.cardBackground,
+                            color: editingUserId ? currentTheme.colors.textTertiary : currentTheme.colors.text,
+                            cursor: editingUserId ? 'not-allowed' : 'text'
                           }}
                           required
                         />
+                        {editingUserId && (
+                          <p style={{ margin: '4px 0 0', fontSize: '12px', color: currentTheme.colors.textTertiary }}>
+                            Le matricule ne peut pas être modifié
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', color: currentTheme.colors.textSecondary, fontSize: '14px' }}>
@@ -3442,7 +3580,6 @@ export default function AdminDashboard() {
                       style={{
                         backgroundColor: currentTheme.colors.cardBackground,
                     border: `1px solid ${currentTheme.colors.border}`,
-                    transition: 'all 0.3s ease',
                         borderRadius: '12px',
                         boxShadow: currentTheme.shadows.md,
                         overflow: 'hidden',
@@ -6852,7 +6989,7 @@ export default function AdminDashboard() {
                     </p>
                   </div>
                   <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
-                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut</p>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut technique</p>
                     <p
                       style={{
                         margin: '6px 0 0',
@@ -6863,17 +7000,43 @@ export default function AdminDashboard() {
                     >
                       {selectedBatimentDetails.statut ? 'Actif' : 'Inactif'}
                     </p>
+                    {!selectedBatimentDetails.statut && selectedBatimentDetails.motifInactivite && (
+                      <p style={{ margin: '8px 0 0', fontSize: '12px', color: currentTheme.colors.textTertiary, fontStyle: 'italic' }}>
+                        Motif: {selectedBatimentDetails.motifInactivite}
+                      </p>
+                    )}
+                  </div>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut d'utilisation</p>
+                    <p
+                      style={{
+                        margin: '6px 0 0',
+                        fontSize: '18px',
+                        fontWeight: 600,
+                        color: selectedBatimentDetails.statutUtilisation === 'indisponible' || selectedBatimentDetails.estIndisponible 
+                          ? '#991b1b' 
+                          : (selectedBatimentDetails.statutUtilisation === 'libre' || selectedBatimentDetails.estLibre) 
+                            ? '#0369a1' 
+                            : '#b45309'
+                      }}
+                    >
+                      {selectedBatimentDetails.statutUtilisation === 'indisponible' || selectedBatimentDetails.estIndisponible 
+                        ? '⛔ Indisponible' 
+                        : (selectedBatimentDetails.statutUtilisation === 'libre' || selectedBatimentDetails.estLibre) 
+                          ? '🟢 Libre' 
+                          : '🔴 Déjà alloué'}
+                    </p>
                   </div>
                   <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
                     <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Ville</p>
                     <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
-                      {selectedBatimentDetails.ville || 'Non renseignée'}
+                      {selectedBatimentDetails.ville || ''}
                     </p>
                   </div>
                   <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
                     <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Quartier</p>
                     <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
-                      {selectedBatimentDetails.quartier || 'Non renseigné'}
+                      {selectedBatimentDetails.quartier || ''}
                     </p>
                   </div>
                 </div>
@@ -7107,11 +7270,19 @@ export default function AdminDashboard() {
                     }}
                   >
                     <option value="">Sélectionner un bâtiment</option>
-                    {batiments.map(b => (
-                      <option key={b.numBat} value={b.numBat}>
-                        Bâtiment {b.numBat} - {b.adresse}
-                      </option>
-                    ))}
+                    {batiments.map(b => {
+                      let statutText = '🔴 Déjà alloué';
+                      if (b.statutUtilisation === 'indisponible' || b.estIndisponible) {
+                        statutText = '⛔ Indisponible';
+                      } else if (b.statutUtilisation === 'libre' || b.estLibre) {
+                        statutText = '🟢 Libre';
+                      }
+                      return (
+                        <option key={b.numBat} value={b.numBat}>
+                          Bâtiment {b.numBat} - {b.adresse} ({statutText})
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>

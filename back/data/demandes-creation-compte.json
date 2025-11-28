@@ -1,0 +1,14 @@
+[
+  {
+    "id": "1764314981028",
+    "matricule": "em-100900",
+    "poste": "opérateur de saisie",
+    "mdp": "azerty",
+    "statut": "en_attente",
+    "dateCreation": "2025-11-28T07:29:41.028Z",
+    "dateApprobation": null,
+    "dateRejet": null,
+    "approuvePar": null,
+    "rejetePar": null
+  }
+]

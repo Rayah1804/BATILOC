@@ -8,24 +8,27 @@ const errorHandler = require("./middleware/errorHandler");
 const { authenticateToken } = require("./middleware/auth");
 
 // Configuration
-const PORT = process.env.PORT || 3000;
+// Utiliser un port élevé pour éviter les problèmes de permissions Windows
+let PORT = parseInt(process.env.PORT) || 8000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
-// Connexion base de données
+// Connexion base de données - Ne pas bloquer le démarrage si DB échoue
 dbConn.authenticate()
   .then(() => {
     console.log("✅ Connexion à la base de données réussie");
   })
   .catch((err) => {
-    console.error("❌ Erreur de connexion à la base de données:", err);
-    process.exit(1);
+    console.error("⚠️ ATTENTION: Erreur de connexion à la base de données:", err.message);
+    console.error("⚠️ Le serveur démarre quand même - vérifiez MySQL/WAMP");
+    // Ne pas arrêter le serveur - permettre de tester l'API même sans DB
   });
 
 const app = express();
 
-// CORS sécurisé
+// CORS - Configuration simple pour développement
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: true, // Accepter toutes les origines en développement
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma']
@@ -63,9 +66,40 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "../front/src/App")
 // Gestion des erreurs (doit être le dernier middleware)
 app.use(errorHandler);
 
-// Démarrage du serveur
-app.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
-  console.log(`📡 Frontend URL: ${FRONTEND_URL}`);
-  console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
-});
+// Démarrage du serveur avec gestion automatique du port
+function startServer(port) {
+  // Forcer l'écoute sur 127.0.0.1 pour éviter les problèmes de permissions Windows
+  const server = app.listen(port, '127.0.0.1', () => {
+    console.log(`🚀 Serveur démarré sur http://127.0.0.1:${port}`);
+    console.log(`📡 Frontend URL: ${FRONTEND_URL}`);
+    console.log(`🌍 Environnement: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`✅ Le serveur est prêt à recevoir des requêtes`);
+    console.log(`📝 Testez: http://localhost:${port}/health`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
+      // Essayer plusieurs ports jusqu'à trouver un disponible
+      const ports = [8000, 8001, 9000, 9001, 5000, 5001, 3000, 3001];
+      const currentIndex = ports.indexOf(port);
+      
+      if (currentIndex < ports.length - 1) {
+        const nextPort = ports[currentIndex + 1];
+        console.log(`⚠️ Le port ${port} est occupé ou bloqué, tentative sur le port ${nextPort}...`);
+        startServer(nextPort);
+      } else {
+        console.error(`❌ Impossible de démarrer le serveur. Tous les ports ont été essayés.`);
+        console.error(`   Dernière erreur: ${err.message}`);
+        console.error(`   Essayez de changer le PORT dans le fichier .env`);
+        process.exit(1);
+      }
+    } else {
+      console.error('❌ Erreur serveur:', err);
+      process.exit(1);
+    }
+  });
+
+  return server;
+}
+
+startServer(PORT);

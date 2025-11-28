@@ -3,6 +3,9 @@ import "./style.css";
 import fceL from './images/fcee.gif';
 import batilockLogo from './images/2.png';
 import { useLocation, useNavigate } from "react-router-dom";
+import { API_ENDPOINTS } from './config/api';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 export default function AuthForm() {
   const navigate = useNavigate();
@@ -22,7 +25,7 @@ export default function AuthForm() {
       return;
     }
     try {
-      const response = await fetch('http://localhost:3000/api/user/login', {
+      const response = await fetch(`${API_BASE_URL}${API_ENDPOINTS.LOGIN}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -31,7 +34,28 @@ export default function AuthForm() {
           mdp: loginPassword
         })
       });
-      const data = await response.json();
+
+      // Vérifier si la réponse est OK avant de parser le JSON
+      let data;
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          // Si ce n'est pas du JSON, lire comme texte pour le debug
+          const text = await response.text();
+          console.error('Réponse non-JSON:', text);
+          setMessage({ type: 'danger', text: `Erreur serveur: ${response.status} ${response.statusText}` });
+          setLoading(false);
+          return;
+        }
+      } catch (parseError) {
+        console.error('Erreur parsing JSON:', parseError);
+        setMessage({ type: 'danger', text: `Erreur serveur: Impossible de lire la réponse (${response.status})` });
+        setLoading(false);
+        return;
+      }
+
       if (response.ok && data.token) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('user', JSON.stringify(data.user));
@@ -66,12 +90,19 @@ export default function AuthForm() {
             });
           }
         } else {
-          setMessage({ type: 'danger', text: `Erreur: ${data.message || 'Erreur de connexion.'} Poste reçu: ${data.user?.poste || 'aucun'}` });
+          setMessage({ type: 'danger', text: `Erreur: ${data.message || 'Erreur de connexion.'}` });
         }
         setLoading(false);
       }
-    } catch (err) {
-      setMessage({ type: 'danger', text: 'Erreur serveur ou réseau.' });
+    } catch (err: any) {
+      console.error('Erreur login:', err);
+      const errorMessage = err.message || 'Erreur serveur ou réseau.';
+      // Vérifier si c'est une erreur CORS
+      if (errorMessage.includes('CORS') || errorMessage.includes('Failed to fetch')) {
+        setMessage({ type: 'danger', text: 'Erreur CORS: Le serveur backend ne répond pas ou bloque la requête. Vérifiez que le serveur est démarré.' });
+      } else {
+        setMessage({ type: 'danger', text: `Erreur: ${errorMessage}` });
+      }
       setLoading(false);
     }
   };
@@ -92,7 +123,6 @@ export default function AuthForm() {
   const [resetData, setResetData] = useState({
     matricule: '',
     poste: '',
-    email: '',
     code: '',
     newPassword: '',
     confirmPassword: '',
@@ -417,7 +447,6 @@ export default function AuthForm() {
                 setResetData({
                   matricule: '',
                   poste: '',
-                  email: '',
                   code: '',
                   newPassword: '',
                   confirmPassword: '',
@@ -461,8 +490,7 @@ export default function AuthForm() {
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         matricule: resetData.matricule,
-                        poste: resetData.poste,
-                        email: resetData.email
+                        poste: resetData.poste
                       })
                     });
                     
@@ -553,37 +581,22 @@ export default function AuthForm() {
                   </select>
                 </div>
                 {resetData.poste === 'administrateur' && (
-                  <>
-                    <div className="input-group">
-                      <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="5" width="18" height="14" rx="2"></rect>
-                        <path d="M3 7l9 6 9-6"></path>
-                      </svg>
-                      <input
-                        type="email"
-                        placeholder="Email"
-                        className="input-field"
-                        value={resetData.email}
-                        onChange={e => setResetData({...resetData, email: e.target.value})}
-                      />
-                    </div>
-                    <div className="input-group">
-                      <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                      </svg>
-                      <input
-                        type="text"
-                        placeholder="Clé de récupération (optionnel)"
-                        className="input-field"
-                        value={resetData.recoveryKey}
-                        onChange={e => setResetData({...resetData, recoveryKey: e.target.value})}
-                      />
-                      <small style={{ color: '#999', fontSize: '0.75rem', marginTop: '0.5rem', display: 'block', opacity: 0.7 }}>
-                        Clé d'urgence pour admin (voir .env ADMIN_RECOVERY_KEY)
-                      </small>
-                    </div>
-                  </>
+                  <div className="input-group">
+                    <svg className="input-field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="Clé de récupération (optionnel)"
+                      className="input-field"
+                      value={resetData.recoveryKey}
+                      onChange={e => setResetData({...resetData, recoveryKey: e.target.value})}
+                    />
+                    <small style={{ color: '#999', fontSize: '0.75rem', marginTop: '0.5rem', display: 'block', opacity: 0.7 }}>
+                      Clé d'urgence pour admin (voir .env ADMIN_RECOVERY_KEY)
+                    </small>
+                  </div>
                 )}
                 {resetData.poste && resetData.poste.toLowerCase() !== 'administrateur' && (
                   <div style={{ 
