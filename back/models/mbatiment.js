@@ -38,10 +38,6 @@ module.exports = function(sequelize, DataTypes) {
     statut: {
       type: DataTypes.BOOLEAN,
       allowNull: false
-    },
-    motifInactivite: {
-      type: DataTypes.TEXT,
-      allowNull: true
     }
   }, {
     sequelize,

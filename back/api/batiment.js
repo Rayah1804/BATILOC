@@ -161,20 +161,8 @@ router.get("/", async (req, res) => {
         raw: false
       });
     } catch (error) {
-      // Si l'erreur est due à une colonne manquante, essayer avec raw: true et sélectionner uniquement les colonnes existantes
-      if (error.message && (error.message.includes('motifInactivite') || error.message.includes('Unknown column'))) {
-        console.warn('⚠️ Colonne motifInactivite manquante. Utilisation des colonnes de base uniquement.');
-        result = await MbatimentModel.findAndCountAll({
-          where,
-          limit,
-          offset,
-          order: [['numBat', 'DESC']],
-          attributes: ['numBat', 'image', 'adresse', 'ville', 'quartier', 'latitude', 'longitude', 'montant', 'statut'],
-          raw: false
-        });
-      } else {
-        throw error;
-      }
+      console.error('Erreur lors de la récupération des bâtiments:', error);
+      throw error;
     }
     const { count, rows } = result;
     
@@ -194,11 +182,6 @@ router.get("/", async (req, res) => {
       const batiment = b.toJSON();
       if (batiment.image) {
         batiment.image = batiment.image.toString('base64');
-      }
-      
-      // Initialiser motifInactivite si absent (pour compatibilité avec les anciennes bases de données)
-      if (batiment.motifInactivite === undefined || batiment.motifInactivite === null) {
-        batiment.motifInactivite = null;
       }
       
       // Déterminer le statut d'utilisation
@@ -259,11 +242,6 @@ router.get("/:numBat", async (req, res) => {
       batimentData.image = batimentData.image.toString('base64');
     }
     
-    // Initialiser motifInactivite si absent (pour compatibilité avec les anciennes bases de données)
-    if (batimentData.motifInactivite === undefined || batimentData.motifInactivite === null) {
-      batimentData.motifInactivite = null;
-    }
-
     res.status(200).json({
       message: "Bâtiment récupéré avec succès",
       status: 200,
@@ -282,7 +260,7 @@ router.get("/:numBat", async (req, res) => {
 // CREATE - Créer un nouveau bâtiment
 router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
   try {
-    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude, motifInactivite } = req.body;
+    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
     const villeValue = sanitizeStringField(ville, 60);
     const quartierValue = sanitizeStringField(quartier, 60);
     const latitudeValue = parseCoordinateField(latitude);
@@ -296,14 +274,8 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
       });
     }
     
-    // Validation: si le statut est inactif (false), le motif d'inactivité est obligatoire
+    // Validation du statut
     const statutValue = statut !== undefined ? (statut === 'true' || statut === true || statut === 1) : true;
-    if (!statutValue && (!motifInactivite || motifInactivite.trim() === '')) {
-      return res.status(400).json({
-        message: "Le motif d'inactivité est obligatoire lorsque le statut est inactif",
-        status: 400
-      });
-    }
 
     if (!req.file) {
       return res.status(400).json({
@@ -331,8 +303,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
       latitude: latitudeValue,
       longitude: longitudeValue,
       montant: parseFloat(montant),
-      statut: statutValue,
-      motifInactivite: statutValue ? null : (motifInactivite ? motifInactivite.trim() : null)
+      statut: statutValue
     });
 
     const batimentData = newBatiment.toJSON();
@@ -359,7 +330,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
 router.put("/:numBat", upload.single('image'), async (req, res) => {
   try {
     const { numBat } = req.params;
-    const { adresse, montant, statut, ville, quartier, latitude, longitude, motifInactivite } = req.body;
+    const { adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
 
     // Trouver le bâtiment
     const batiment = await MbatimentModel.findByPk(numBat);
@@ -379,34 +350,6 @@ router.put("/:numBat", upload.single('image'), async (req, res) => {
     if (statut !== undefined) {
       const newStatutValue = (statut === 'true' || statut === true || statut === 1);
       updateData.statut = newStatutValue;
-      
-      // Validation: si le statut devient inactif, le motif d'inactivité est obligatoire
-      if (!newStatutValue && (!motifInactivite || motifInactivite.trim() === '')) {
-        return res.status(400).json({
-          message: "Le motif d'inactivité est obligatoire lorsque le statut est inactif",
-          status: 400
-        });
-      }
-      
-      // Si le statut devient actif, on efface le motif d'inactivité
-      if (newStatutValue) {
-        updateData.motifInactivite = null;
-      } else if (motifInactivite !== undefined) {
-        updateData.motifInactivite = motifInactivite.trim();
-      }
-    } else if (motifInactivite !== undefined) {
-      // Si seul le motif change sans changer le statut
-      // Vérifier que le bâtiment n'est pas actif
-      const currentStatut = batiment.statut;
-      if (!currentStatut) {
-        if (!motifInactivite || motifInactivite.trim() === '') {
-          return res.status(400).json({
-            message: "Le motif d'inactivité est obligatoire pour un bâtiment inactif",
-            status: 400
-          });
-        }
-        updateData.motifInactivite = motifInactivite.trim();
-      }
     }
     
     if (ville !== undefined) {
