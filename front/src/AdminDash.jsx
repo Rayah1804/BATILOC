@@ -1739,6 +1739,28 @@ export default function AdminDashboard() {
   };
 
   const onDelete = async (numBat) => {
+    // Trouver le bâtiment dans la liste pour vérifier son statut
+    const batiment = batiments.find(b => b.numBat === numBat);
+    
+    // Vérifier si le bâtiment est actif et utilisé
+    if (batiment && batiment.statut === true && (batiment.statutUtilisation === 'alloué' || batiment.estAlloue)) {
+      // Afficher une notification d'alerte
+      setMsg('⚠️ Ce bâtiment ne peut pas être supprimé car il est encore actif et utilisé par un client dans une convention');
+      setTimeout(() => setMsg(''), 5000);
+      return;
+    }
+
+    // Demander confirmation avant suppression
+    const confirmed = await confirm({
+      title: 'Supprimer le bâtiment',
+      message: `Êtes-vous sûr de vouloir supprimer le bâtiment n°${numBat} ?`,
+      type: 'warning',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler'
+    });
+    
+    if (!confirmed) return;
+
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
@@ -1760,17 +1782,22 @@ export default function AdminDashboard() {
       const result = await response.json();
 
       if (result.status === 200) {
-        setMsg('Bâtiment supprimé avec succès');
+        setMsg('✅ Bâtiment supprimé avec succès');
         await loadBatiments();
+      } else if (result.status === 409) {
+        // Erreur 409 = Conflit (bâtiment utilisé)
+        setMsg(`⚠️ ${result.message || 'Ce bâtiment ne peut pas être supprimé car il est utilisé par un client dans une convention'}`);
+        setTimeout(() => setMsg(''), 5000);
       } else {
-        setMsg(result.message || 'Erreur lors de la suppression');
+        setMsg(`❌ ${result.message || 'Erreur lors de la suppression'}`);
+        setTimeout(() => setMsg(''), 3000);
       }
     } catch (error) {
       console.error('Erreur:', error);
-      setMsg('Erreur lors de la suppression');
+      setMsg('❌ Erreur lors de la suppression');
+      setTimeout(() => setMsg(''), 3000);
     } finally {
       setLoading(false);
-      setTimeout(() => setMsg(''), 3000);
     }
   };
 
@@ -4230,15 +4257,35 @@ export default function AdminDashboard() {
                 {/* Détails */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '24px' }}>
                   {/* Bâtiment */}
-                  <div style={{
-                    padding: '20px',
-                    background: currentTheme.colors.backgroundTertiary,
-                    borderRadius: '12px',
-                    border: `1px solid ${currentTheme.colors.border}`
-                  }}>
-                    <h3 style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.primary }}>
-                      Bâtiment
-                    </h3>
+                  <div 
+                    style={{
+                      padding: '20px',
+                      background: currentTheme.colors.backgroundTertiary,
+                      borderRadius: '12px',
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease'
+                    }}
+                    onClick={() => {
+                      if (selectedConvention.batiment) {
+                        openBatimentDetails(selectedConvention.batiment);
+                      }
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = currentTheme.colors.backgroundSecondary;
+                      e.currentTarget.style.borderColor = currentTheme.colors.primary;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = currentTheme.colors.backgroundTertiary;
+                      e.currentTarget.style.borderColor = currentTheme.colors.border;
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.colors.primary }}>
+                        Bâtiment
+                      </h3>
+                      <i className="fas fa-external-link-alt" style={{ fontSize: '12px', color: currentTheme.colors.primary, opacity: 0.7 }}></i>
+                    </div>
                     <div style={{ display: 'grid', gap: '12px', fontSize: '14px', color: currentTheme.colors.text, lineHeight: 1.6 }}>
                       <div>
                         <strong style={{ color: currentTheme.colors.textSecondary }}>N° :</strong>{' '}
@@ -4254,6 +4301,17 @@ export default function AdminDashboard() {
                           {Number(selectedConvention.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
                         </span>
                       </div>
+                      {selectedConvention.batiment?.superficie && (
+                        <div>
+                          <strong style={{ color: currentTheme.colors.textSecondary }}>Superficie :</strong>{' '}
+                          <span style={{ color: currentTheme.colors.text, fontWeight: 600 }}>
+                            {Number(selectedConvention.batiment.superficie).toLocaleString('fr-FR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })} m²
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -6986,6 +7044,17 @@ export default function AdminDashboard() {
                             maximumFractionDigits: 2
                           })} Ar`
                         : (selectedBatimentDetails.montant ?? 'Non renseigné')}
+                    </p>
+                  </div>
+                  <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                    <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Superficie</p>
+                    <p style={{ margin: '6px 0 0', fontSize: '18px', color: currentTheme.colors.text, fontWeight: 600 }}>
+                      {selectedBatimentDetails.superficie 
+                        ? `${selectedBatimentDetails.superficie.toLocaleString('fr-FR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })} m²`
+                        : 'Non renseigné'}
                     </p>
                   </div>
                   <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>

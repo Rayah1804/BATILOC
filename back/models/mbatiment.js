@@ -31,6 +31,11 @@ module.exports = function(sequelize, DataTypes) {
       type: DataTypes.DOUBLE,
       allowNull: true
     },
+    superficie: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      comment: 'Superficie du terrain en mètres carrés'
+    },
     montant: {
       type: DataTypes.DOUBLE,
       allowNull: false

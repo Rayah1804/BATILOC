@@ -260,11 +260,12 @@ router.get("/:numBat", async (req, res) => {
 // CREATE - Créer un nouveau bâtiment
 router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
   try {
-    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
+    const { numBat, adresse, montant, statut, ville, quartier, latitude, longitude, superficie } = req.body;
     const villeValue = sanitizeStringField(ville, 60);
     const quartierValue = sanitizeStringField(quartier, 60);
     const latitudeValue = parseCoordinateField(latitude);
     const longitudeValue = parseCoordinateField(longitude);
+    const superficieValue = superficie !== undefined ? parseFloat(superficie) : null;
 
     // Validation des champs
     if (!numBat || !adresse || !montant) {
@@ -302,6 +303,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
       quartier: quartierValue,
       latitude: latitudeValue,
       longitude: longitudeValue,
+      superficie: superficieValue,
       montant: parseFloat(montant),
       statut: statutValue
     });
@@ -330,7 +332,7 @@ router.post("/", upload.single('image'), validateBatiment, async (req, res) => {
 router.put("/:numBat", upload.single('image'), async (req, res) => {
   try {
     const { numBat } = req.params;
-    const { adresse, montant, statut, ville, quartier, latitude, longitude } = req.body;
+    const { adresse, montant, statut, ville, quartier, latitude, longitude, superficie } = req.body;
 
     // Trouver le bâtiment
     const batiment = await MbatimentModel.findByPk(numBat);
@@ -363,6 +365,10 @@ router.put("/:numBat", upload.single('image'), async (req, res) => {
     }
     if (longitude !== undefined) {
       updateData.longitude = parseCoordinateField(longitude);
+    }
+    if (superficie !== undefined) {
+      const superficieValue = parseFloat(superficie);
+      updateData.superficie = Number.isFinite(superficieValue) ? superficieValue : null;
     }
     if (req.file) {
       updateData.image = req.file.buffer;
@@ -489,24 +495,85 @@ router.get("/diagnostic/usage", async (req, res) => {
 
 // DELETE - Supprimer un bâtiment
 router.delete("/:numBat", async (req, res) => {
+  const transaction = await sequelize.transaction();
   try {
     const { numBat } = req.params;
 
-    const batiment = await MbatimentModel.findByPk(numBat);
+    // Vérifier si le bâtiment existe
+    const batiment = await MbatimentModel.findByPk(numBat, { transaction });
     if (!batiment) {
+      await transaction.rollback();
       return res.status(404).json({
         message: "Bâtiment non trouvé",
         status: 404
       });
     }
 
-    await batiment.destroy();
+    const batimentData = batiment.toJSON();
+    const statutBatiment = batimentData.statut; // true = actif, false = indisponible
+
+    // Vérifier si le bâtiment est utilisé dans une convention
+    const conventions = await Convention.findAll({
+      where: { numBat: parseInt(numBat) },
+      transaction
+    });
+
+    const estUtilise = conventions.length > 0;
+
+    // Logique de suppression selon les règles métier :
+    // 1. Si le bâtiment est indisponible (statut = false) → peut être supprimé même s'il est utilisé
+    // 2. Si le bâtiment est actif (statut = true) ET utilisé → ne peut pas être supprimé
+    // 3. Si le bâtiment est actif (statut = true) ET supprimé → supprimer toutes les conventions liées
+    //    (Note: ce cas ne se produit que si le bâtiment actif n'est pas utilisé, donc pas de conventions à supprimer)
+
+    if (statutBatiment === true && estUtilise) {
+      // Bâtiment actif utilisé → ne peut pas être supprimé
+      await transaction.rollback();
+      return res.status(409).json({
+        message: "Ce bâtiment ne peut pas être supprimé car il est utilisé par un client dans une convention",
+        status: 409,
+        details: {
+          numBat: parseInt(numBat),
+          statut: "actif",
+          nombreConventions: conventions.length
+        }
+      });
+    }
+
+    // Si le bâtiment a des conventions liées (cas du bâtiment indisponible utilisé),
+    // supprimer aussi les conventions liées
+    if (conventions.length > 0) {
+      console.log(`🗑️ Suppression de ${conventions.length} convention(s) liée(s) au bâtiment ${numBat}`);
+      
+      // Supprimer toutes les conventions liées à ce bâtiment
+      // (Les factures seront supprimées automatiquement via CASCADE)
+      for (const convention of conventions) {
+        await convention.destroy({ transaction });
+        console.log(`✅ Convention #${convention.numConv} supprimée`);
+      }
+    }
+
+    // Supprimer le bâtiment
+    await batiment.destroy({ transaction });
+
+    // Commit de la transaction
+    await transaction.commit();
+
+    const message = conventions.length > 0
+      ? `Bâtiment et ${conventions.length} convention(s) liée(s) supprimé(s) avec succès`
+      : "Bâtiment supprimé avec succès";
 
     res.status(200).json({
-      message: "Bâtiment supprimé avec succès",
-      status: 200
+      message: message,
+      status: 200,
+      details: {
+        numBat: parseInt(numBat),
+        statut: statutBatiment ? "actif" : "indisponible",
+        conventionsSupprimees: conventions.length
+      }
     });
   } catch (error) {
+    await transaction.rollback();
     console.error('Erreur lors de la suppression du bâtiment:', error);
     res.status(500).json({
       message: "Erreur lors de la suppression du bâtiment",

@@ -3297,12 +3297,13 @@ export default function RedacteurHome() {
                       background: currentTheme.colors.backgroundTertiary,
                       borderBottom: `1px solid ${currentTheme.colors.border}`
                     }}>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>N° Convention</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '20%' }}>Client</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Montant</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Statut</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Date</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '23%' }}>Actions</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>N° Convention</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '18%' }}>Client</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Montant</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Superficie</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Statut</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Date</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '24%' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3331,6 +3332,14 @@ export default function RedacteurHome() {
                         </td>
                         <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 600 }}>
                           {Number(c.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
+                        </td>
+                        <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 500 }}>
+                          {c.batiment?.superficie 
+                            ? `${Number(c.batiment.superficie).toLocaleString('fr-FR', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2
+                              })} m²`
+                            : <span style={{ color: currentTheme.colors.textTertiary, fontStyle: 'italic' }}>N/A</span>}
                         </td>
                         <td style={{ padding: '12px 8px', textAlign: 'center' }}>
                           <span style={{
@@ -3616,6 +3625,17 @@ export default function RedacteurHome() {
                       <strong style={{ color: currentTheme.colors.textSecondary }}>Loyer :</strong>{' '}
                       <span style={{ color: currentTheme.colors.text, fontWeight: 600 }}>
                         {Number(selectedConv.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
+                      </span>
+                    </div>
+                    <div>
+                      <strong style={{ color: currentTheme.colors.textSecondary }}>Superficie :</strong>{' '}
+                      <span style={{ color: currentTheme.colors.text, fontWeight: 600 }}>
+                        {selectedConv.batiment?.superficie 
+                          ? `${Number(selectedConv.batiment.superficie).toLocaleString('fr-FR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })} m²`
+                          : 'Non renseigné'}
                       </span>
                     </div>
                   </div>
@@ -3984,6 +4004,17 @@ export default function RedacteurHome() {
                 <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
                   <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Montant</span>
                   <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>{Number(batimentForDetail.montant || 0).toLocaleString('fr-FR')} Ar</p>
+                </div>
+                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
+                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Superficie</span>
+                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>
+                    {batimentForDetail.superficie 
+                      ? `${Number(batimentForDetail.superficie).toLocaleString('fr-FR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })} m²`
+                      : 'Non renseigné'}
+                  </p>
                 </div>
                 <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
                   <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut</span>
