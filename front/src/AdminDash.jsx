@@ -6,6 +6,8 @@ import { lightTheme, darkTheme } from './theme';
 import ThemeToggle from './components/ThemeToggle';
 import { useConfirm } from './hooks/useConfirm';
 import ConfirmModal from './components/ConfirmModal';
+import { useInput } from './hooks/useInput';
+import InputModal from './components/InputModal';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -41,6 +43,7 @@ export default function AdminDashboard() {
   const { theme, isDark } = useTheme();
   const currentTheme = isDark ? darkTheme : lightTheme;
   const { confirm, close, confirmState } = useConfirm();
+  const { prompt: promptInput, close: closeInput, inputState } = useInput();
   const [batiments, setBatiments] = useState([]);
   const [utilisateurs, setUtilisateurs] = useState([]);
   const [conventions, setConventions] = useState([]);
@@ -128,7 +131,7 @@ export default function AdminDashboard() {
   const [conventionStep, setConventionStep] = useState(1);
   const [conventionForm, setConventionForm] = useState({
     step1: { numBat: '', adresse: '', montant: '' },
-    step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '' }
+    step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '', contact: '' }
   });
   const API_USERS_URL = useMemo(() => `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/user`, []);
 
@@ -888,7 +891,7 @@ export default function AdminDashboard() {
         setSelectedConvention(null);
         setConventionForm({
           step1: { numBat: '', adresse: '', montant: '' },
-          step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '' }
+          step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '', contact: '' }
         });
       } else {
         setMsg(result.message || 'Erreur lors de l\'enregistrement');
@@ -1739,37 +1742,107 @@ export default function AdminDashboard() {
   };
 
   const onDelete = async (numBat) => {
-    // Trouver le bâtiment dans la liste pour vérifier son statut
-    const batiment = batiments.find(b => b.numBat === numBat);
+    const token = localStorage.getItem('token');
     
-    // Vérifier si le bâtiment est actif et utilisé
-    if (batiment && batiment.statut === true && (batiment.statutUtilisation === 'alloué' || batiment.estAlloue)) {
-      // Afficher une notification d'alerte
-      setMsg('⚠️ Ce bâtiment ne peut pas être supprimé car il est encore actif et utilisé par un client dans une convention');
-      setTimeout(() => setMsg(''), 5000);
-      return;
+    // CAS 1 : Vérifier d'abord si le bâtiment a une convention en cours
+    // On vérifie via l'API pour avoir les données à jour
+    try {
+      const convResponse = await fetch(`${API_CONVS}?numBat=${numBat}&statut=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      let conventionsActives = [];
+      if (convResponse.ok) {
+        const convData = await convResponse.json();
+        if (convData.data && Array.isArray(convData.data)) {
+          conventionsActives = convData.data.filter(conv => conv.statutConv === true);
+        }
+      }
+      
+      // CAS 1 : Le bâtiment a une convention EN COURS
+      if (conventionsActives.length > 0) {
+        setMsg('⚠️ Impossible de supprimer : ce bâtiment est encore loué par un client.');
+        setTimeout(() => setMsg(''), 5000);
+        // La notification sera créée côté backend lors de la tentative de suppression
+        return;
+      }
+    } catch (error) {
+      console.error('Erreur lors de la vérification des conventions:', error);
+      // Continuer quand même, le backend vérifiera aussi
     }
-
-    // Demander confirmation avant suppression
-    const confirmed = await confirm({
-      title: 'Supprimer le bâtiment',
-      message: `Êtes-vous sûr de vouloir supprimer le bâtiment n°${numBat} ?`,
+    
+    // CAS 2 et 3 : Le bâtiment n'a pas de convention en cours
+    // Demander le motif de suppression (obligatoire)
+    const motifOptions = [
+      { value: 'Bâtiment détruit', label: 'Bâtiment détruit' },
+      { value: 'Bâtiment inutilisable', label: 'Bâtiment inutilisable' },
+      { value: 'Erreur d\'enregistrement', label: 'Erreur d\'enregistrement' },
+      { value: 'Autre motif', label: 'Autre motif' }
+    ];
+    
+    const motif = await promptInput({
+      title: 'Motif de suppression',
+      message: `Veuillez indiquer le motif de suppression du bâtiment n°${numBat} :`,
+      inputLabel: 'Motif',
+      inputPlaceholder: 'Sélectionner un motif...',
       type: 'warning',
+      confirmText: 'Continuer',
+      cancelText: 'Annuler',
+      required: true,
+      options: motifOptions
+    });
+    
+    if (!motif) {
+      return; // L'utilisateur a annulé
+    }
+    
+    // Si "Autre motif" est sélectionné, demander la saisie libre
+    let motifFinal = motif;
+    if (motif === 'Autre motif') {
+      const autreMotif = await promptInput({
+        title: 'Préciser le motif',
+        message: 'Veuillez préciser le motif de suppression :',
+        inputLabel: 'Motif',
+        inputPlaceholder: 'Entrez le motif de suppression...',
+        type: 'warning',
+        confirmText: 'Continuer',
+        cancelText: 'Annuler',
+        required: true,
+        options: null
+      });
+      
+      if (!autreMotif) {
+        return; // L'utilisateur a annulé
+      }
+      motifFinal = autreMotif;
+    }
+    
+    // Demander confirmation finale
+    const confirmed = await confirm({
+      title: 'Confirmer la suppression',
+      message: `Êtes-vous sûr de vouloir supprimer le bâtiment n°${numBat} ?\n\nMotif : ${motifFinal}`,
+      type: 'danger',
       confirmText: 'Supprimer',
       cancelText: 'Annuler'
     });
     
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
+    // Effectuer la suppression avec le motif
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
       const response = await fetch(`${API_URL}/${numBat}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ motif: motifFinal })
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -1785,9 +1858,16 @@ export default function AdminDashboard() {
         setMsg('✅ Bâtiment supprimé avec succès');
         await loadBatiments();
       } else if (result.status === 409) {
-        // Erreur 409 = Conflit (bâtiment utilisé)
-        setMsg(`⚠️ ${result.message || 'Ce bâtiment ne peut pas être supprimé car il est utilisé par un client dans une convention'}`);
+        // CAS 1 : Convention en cours (double vérification côté backend)
+        setMsg(`⚠️ ${result.message || 'Impossible de supprimer : ce bâtiment est encore loué par un client.'}`);
+        if (result.details?.notification) {
+          console.log('📢 Notification créée:', result.details.notification);
+        }
         setTimeout(() => setMsg(''), 5000);
+      } else if (result.status === 400) {
+        // Motif manquant
+        setMsg(`❌ ${result.message || 'Un motif de suppression est obligatoire'}`);
+        setTimeout(() => setMsg(''), 3000);
       } else {
         setMsg(`❌ ${result.message || 'Erreur lors de la suppression'}`);
         setTimeout(() => setMsg(''), 3000);
@@ -1992,6 +2072,19 @@ export default function AdminDashboard() {
   const statsFilteredBatiments = filterByPeriod(batiments, statsPeriodFilter);
   const statsFilteredUtilisateurs = filterByPeriod(utilisateurs, statsPeriodFilter);
   const statsFilteredConventions = filterByPeriod(conventions, statsPeriodFilter);
+
+  // Vérifier si les colonnes Contact, Ville, Quartier ont des données
+  const hasContactData = useMemo(() => {
+    return conventions.some(c => c.contact && c.contact.trim() !== '' && c.contact !== 'N/A');
+  }, [conventions]);
+
+  const hasVilleData = useMemo(() => {
+    return conventions.some(c => c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée');
+  }, [conventions]);
+
+  const hasQuartierData = useMemo(() => {
+    return conventions.some(c => c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné');
+  }, [conventions]);
 
   const stats = {
     totalBatiments: statsFilteredBatiments.length,
@@ -4074,12 +4167,15 @@ export default function AdminDashboard() {
                         background: currentTheme.colors.backgroundTertiary,
                         borderBottom: `1px solid ${currentTheme.colors.border}`
                       }}>
-                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>N° Convention</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '20%' }}>Client</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Montant</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Statut</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Date</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '23%' }}>Actions</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>N° Convention</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Client</th>
+                        {hasContactData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Contact</th>}
+                        {hasVilleData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Ville</th>}
+                        {hasQuartierData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Quartier</th>}
+                        <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Montant</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Statut</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Date</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '26%' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4105,6 +4201,15 @@ export default function AdminDashboard() {
                           </td>
                           <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
                             {c.locataire?.nomcli || 'N/A'}
+                          </td>
+                          <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                            {c.contact && c.contact.trim() !== '' && c.contact !== 'N/A' ? c.contact : '-'}
+                          </td>
+                          <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                            {c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée' ? c.batiment.ville : '-'}
+                          </td>
+                          <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                            {c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné' ? c.batiment.quartier : '-'}
                           </td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 600 }}>
                             {Number(c.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
@@ -7227,7 +7332,7 @@ export default function AdminDashboard() {
             setSelectedConvention(null);
             setConventionForm({
               step1: { numBat: '', adresse: '', montant: '' },
-              step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '' }
+              step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '', contact: '' }
             });
           }}
         >
@@ -7256,7 +7361,7 @@ export default function AdminDashboard() {
                   setSelectedConvention(null);
                   setConventionForm({
                     step1: { numBat: '', adresse: '', montant: '' },
-                    step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '' }
+                    step2: { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '', contact: '' }
                   });
                 }}
                 style={{
@@ -7694,6 +7799,33 @@ export default function AdminDashboard() {
                     }}
                   />
                 </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500, color: currentTheme.colors.text }}>
+                    Contact
+                  </label>
+                  <input
+                    type="text"
+                    value={conventionForm.step2.contact}
+                    onChange={(e) => {
+                      // Ne garder que les chiffres, espaces, + et -
+                      const value = e.target.value.replace(/[^0-9+\-\s]/g, '');
+                      setConventionForm({
+                        ...conventionForm,
+                        step2: { ...conventionForm.step2, contact: value }
+                      });
+                    }}
+                    placeholder="Ex: +261 34 12 345 67"
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      backgroundColor: currentTheme.colors.cardBackground,
+                      color: currentTheme.colors.text,
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '16px' }}>
                   <button
                     onClick={() => setConventionStep(1)}
@@ -8001,6 +8133,22 @@ export default function AdminDashboard() {
         type={confirmState.type}
         confirmText={confirmState.confirmText}
         cancelText={confirmState.cancelText}
+      />
+
+      <InputModal
+        isOpen={inputState.isOpen}
+        onClose={closeInput}
+        onConfirm={inputState.onConfirm || (() => {})}
+        onCancel={inputState.onCancel || (() => {})}
+        title={inputState.title}
+        message={inputState.message}
+        inputLabel={inputState.inputLabel}
+        inputPlaceholder={inputState.inputPlaceholder}
+        type={inputState.type}
+        confirmText={inputState.confirmText}
+        cancelText={inputState.cancelText}
+        required={inputState.required}
+        options={inputState.options}
       />
 
       {/* Modal d'approbation de demande de création de compte */}

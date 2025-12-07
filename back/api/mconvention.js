@@ -136,9 +136,19 @@ router.get("/", async (req, res) => {
 
     const data = rows.map(r => {
       const conv = r.toJSON();
+      // S'assurer que le champ contact existe (peut être undefined si la colonne n'existe pas encore)
+      const contact = conv.contact || null;
+      const batiment = batimentsById.get(conv.numBat);
+      
       return {
         ...conv,
-        batiment: batimentsById.get(conv.numBat) || null,
+        contact: contact,
+        batiment: batiment ? {
+          ...batiment,
+          // S'assurer que ville et quartier sont bien présents
+          ville: batiment.ville || null,
+          quartier: batiment.quartier || null
+        } : null,
         locataire: locatairesById.get(conv.codeCli) || null,
       };
     });
@@ -284,7 +294,8 @@ router.post("/", require("../middleware/validator").validateConvention, async (r
       statutConv: !!statutConv,
       numBat: bat.numBat,
       codeCli: loc.codeCli,
-      numFact: null
+      numFact: null,
+      contact: contact ? String(contact).substring(0, 20) : null
     }, { transaction: t });
 
     await t.commit();
@@ -307,7 +318,7 @@ router.put("/:numConv", async (req, res) => {
       // step 2 - locataire
       nomcli, datenais, lieunais, pere, mere, cin, delivcin, adressecli, activite,
       // optional
-      statutConv
+      statutConv, contact
     } = req.body;
 
     const conv = await Convention.findByPk(numConv, { transaction: t });
@@ -363,6 +374,7 @@ router.put("/:numConv", async (req, res) => {
     // Mettre à jour la convention elle-même
     const convUpdates = {};
     if (statutConv !== undefined) convUpdates.statutConv = !!statutConv;
+    if (contact !== undefined) convUpdates.contact = contact ? String(contact).substring(0, 20) : null;
     if (numBat !== undefined) {
       convUpdates.numBat = Number(numBat);
       // Mettre à jour le lieu si le bâtiment change

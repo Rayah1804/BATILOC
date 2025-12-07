@@ -41,6 +41,19 @@ export default function CaissierHome() {
     montantTotal: 0
   });
 
+  // Vérifier si les colonnes Contact, Ville, Quartier ont des données
+  const hasContactData = useMemo(() => {
+    return conventions.some(c => c.contact && c.contact.trim() !== '' && c.contact !== 'N/A');
+  }, [conventions]);
+
+  const hasVilleData = useMemo(() => {
+    return conventions.some(c => c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée');
+  }, [conventions]);
+
+  const hasQuartierData = useMemo(() => {
+    return conventions.some(c => c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné');
+  }, [conventions]);
+
   // Pagination
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
@@ -3483,12 +3496,15 @@ export default function CaissierHome() {
                       background: currentTheme.colors.backgroundTertiary,
                       borderBottom: `1px solid ${currentTheme.colors.border}`
                     }}>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>N° Convention</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '20%' }}>Client</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Montant</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Statut</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '15%' }}>Date</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '23%' }}>Actions</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>N° Convention</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Client</th>
+                      {hasContactData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Contact</th>}
+                      {hasVilleData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Ville</th>}
+                      {hasQuartierData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Quartier</th>}
+                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Montant</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Statut</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Date</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '26%' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3518,6 +3534,15 @@ export default function CaissierHome() {
                         <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
                           {conv.locataire?.nomcli || 'N/A'}
                         </td>
+                        {hasContactData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {conv.contact && conv.contact.trim() !== '' && conv.contact !== 'N/A' ? conv.contact : '-'}
+                        </td>}
+                        {hasVilleData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {conv.batiment?.ville && conv.batiment.ville.trim() !== '' && conv.batiment.ville !== 'Non renseignée' ? conv.batiment.ville : '-'}
+                        </td>}
+                        {hasQuartierData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {conv.batiment?.quartier && conv.batiment.quartier.trim() !== '' && conv.batiment.quartier !== 'Non renseigné' ? conv.batiment.quartier : '-'}
+                        </td>}
                         <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 600 }}>
                           {Number(conv.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
                         </td>
@@ -4715,7 +4740,7 @@ export default function CaissierHome() {
                       <div>
                         <strong style={{ color: currentTheme.colors.textSecondary }}>Contact :</strong>{' '}
                         <span style={{ color: currentTheme.colors.text }}>
-                          {(factureDetails?.convention?.locataire?.contact || factureDetails?.locataire?.contact || selectedFacture.convention?.locataire?.contact || 'N/A')}
+                          {(factureDetails?.convention?.contact || selectedFacture.convention?.contact || factureDetails?.convention?.locataire?.contact || factureDetails?.locataire?.contact || selectedFacture.convention?.locataire?.contact || 'N/A')}
                         </span>
                       </div>
                       {(factureDetails?.convention?.locataire?.adressecli || factureDetails?.locataire?.adressecli || selectedFacture.convention?.locataire?.adressecli) && (

@@ -498,6 +498,7 @@ router.delete("/:numBat", async (req, res) => {
   const transaction = await sequelize.transaction();
   try {
     const { numBat } = req.params;
+    const { motif } = req.body; // Motif de suppression (obligatoire pour CAS 2 et 3)
 
     // Vérifier si le bâtiment existe
     const batiment = await MbatimentModel.findByPk(numBat, { transaction });
@@ -509,41 +510,63 @@ router.delete("/:numBat", async (req, res) => {
       });
     }
 
-    const batimentData = batiment.toJSON();
-    const statutBatiment = batimentData.statut; // true = actif, false = indisponible
-
-    // Vérifier si le bâtiment est utilisé dans une convention
+    // Récupérer toutes les conventions liées à ce bâtiment
     const conventions = await Convention.findAll({
       where: { numBat: parseInt(numBat) },
       transaction
     });
 
-    const estUtilise = conventions.length > 0;
-
-    // Logique de suppression selon les règles métier :
-    // 1. Si le bâtiment est indisponible (statut = false) → peut être supprimé même s'il est utilisé
-    // 2. Si le bâtiment est actif (statut = true) ET utilisé → ne peut pas être supprimé
-    // 3. Si le bâtiment est actif (statut = true) ET supprimé → supprimer toutes les conventions liées
-    //    (Note: ce cas ne se produit que si le bâtiment actif n'est pas utilisé, donc pas de conventions à supprimer)
-
-    if (statutBatiment === true && estUtilise) {
-      // Bâtiment actif utilisé → ne peut pas être supprimé
+    // CAS 1 : Le bâtiment a une convention EN COURS (statutConv = true)
+    const conventionsEnCours = conventions.filter(conv => conv.statutConv === true);
+    
+    if (conventionsEnCours.length > 0) {
+      // La suppression est interdite
       await transaction.rollback();
+      
+      // Créer une notification (on peut la logger pour l'instant)
+      const notification = {
+        type: 'suppression_batiment_bloquee',
+        numBat: parseInt(numBat),
+        message: `Suppression du bâtiment ${numBat} bloquée : bâtiment encore loué par un client`,
+        date: new Date().toISOString(),
+        conventionsActives: conventionsEnCours.map(c => c.numConv)
+      };
+      console.log('📢 Notification créée:', JSON.stringify(notification, null, 2));
+      
       return res.status(409).json({
-        message: "Ce bâtiment ne peut pas être supprimé car il est utilisé par un client dans une convention",
+        message: "Impossible de supprimer : ce bâtiment est encore loué par un client.",
         status: 409,
         details: {
           numBat: parseInt(numBat),
-          statut: "actif",
-          nombreConventions: conventions.length
+          nombreConventionsActives: conventionsEnCours.length,
+          conventionsActives: conventionsEnCours.map(c => c.numConv),
+          notification: "Une notification a été créée pour informer qu'il faudra attendre la fin du contrat."
         }
       });
     }
 
-    // Si le bâtiment a des conventions liées (cas du bâtiment indisponible utilisé),
-    // supprimer aussi les conventions liées
+    // CAS 2 et 3 : Le bâtiment n'a pas de convention en cours
+    // Vérifier si un motif est fourni (obligatoire pour CAS 2 et 3)
+    if (!motif || motif.trim() === '') {
+      await transaction.rollback();
+      return res.status(400).json({
+        message: "Un motif de suppression est obligatoire",
+        status: 400,
+        details: {
+          numBat: parseInt(numBat),
+          aDesConventionsTerminees: conventions.length > 0
+        }
+      });
+    }
+
+    // CAS 2 : Le bâtiment avait une convention, mais elle est terminée
+    // CAS 3 : Le bâtiment n'a jamais eu de convention
+    // Dans les deux cas, on peut supprimer (le motif a été fourni)
+
+    // Si le bâtiment a des conventions terminées, les supprimer aussi
     if (conventions.length > 0) {
-      console.log(`🗑️ Suppression de ${conventions.length} convention(s) liée(s) au bâtiment ${numBat}`);
+      console.log(`🗑️ Suppression de ${conventions.length} convention(s) terminée(s) liée(s) au bâtiment ${numBat}`);
+      console.log(`📝 Motif de suppression: ${motif}`);
       
       // Supprimer toutes les conventions liées à ce bâtiment
       // (Les factures seront supprimées automatiquement via CASCADE)
@@ -551,6 +574,9 @@ router.delete("/:numBat", async (req, res) => {
         await convention.destroy({ transaction });
         console.log(`✅ Convention #${convention.numConv} supprimée`);
       }
+    } else {
+      console.log(`🗑️ Suppression du bâtiment ${numBat} (jamais eu de convention)`);
+      console.log(`📝 Motif de suppression: ${motif}`);
     }
 
     // Supprimer le bâtiment
@@ -560,7 +586,7 @@ router.delete("/:numBat", async (req, res) => {
     await transaction.commit();
 
     const message = conventions.length > 0
-      ? `Bâtiment et ${conventions.length} convention(s) liée(s) supprimé(s) avec succès`
+      ? `Bâtiment et ${conventions.length} convention(s) terminée(s) supprimé(s) avec succès`
       : "Bâtiment supprimé avec succès";
 
     res.status(200).json({
@@ -568,7 +594,7 @@ router.delete("/:numBat", async (req, res) => {
       status: 200,
       details: {
         numBat: parseInt(numBat),
-        statut: statutBatiment ? "actif" : "indisponible",
+        motif: motif,
         conventionsSupprimees: conventions.length
       }
     });

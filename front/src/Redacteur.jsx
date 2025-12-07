@@ -16,7 +16,7 @@ import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
 // Etats initiaux
 const initialStep1 = { numBat: '', adresse: '', montant: '' };
-const initialStep2 = { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '' };
+const initialStep2 = { nomcli: '', datenais: '', lieunais: '', pere: '', mere: '', cin: '', delivcin: '', adressecli: '', activite: '', contact: '' };
 
 export default function RedacteurHome() {
   const navigate = useNavigate();
@@ -152,6 +152,19 @@ export default function RedacteurHome() {
     // Filtre par période pour les statistiques
     return filterConventionsByPeriod(filtered, statsPeriodFilter);
   }, [conventions, search, statsPeriodFilter]);
+
+  // Vérifier si les colonnes Contact, Ville, Quartier ont des données
+  const hasContactData = useMemo(() => {
+    return filteredConventions.some(c => c.contact && c.contact.trim() !== '' && c.contact !== 'N/A');
+  }, [filteredConventions]);
+
+  const hasVilleData = useMemo(() => {
+    return filteredConventions.some(c => c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée');
+  }, [filteredConventions]);
+
+  const hasQuartierData = useMemo(() => {
+    return filteredConventions.some(c => c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné');
+  }, [filteredConventions]);
 
   const stats = useMemo(() => {
     const total = filteredConventions.length;
@@ -347,6 +360,7 @@ export default function RedacteurHome() {
       if (j.status === 200 || j.status === 201) {
         // Forcer la mise à jour avec les nouvelles données
         const newData = Array.isArray(j.data) ? j.data : [];
+        console.log(`✅ ${newData.length} convention(s) chargée(s) avec succès`);
         setConventions(newData);
       } else {
         // Gérer les autres statuts
@@ -709,7 +723,8 @@ export default function RedacteurHome() {
       cin: c.locataire?.cin ? c.locataire.cin.replace(/\D/g, '').replace(/(\d{3})(?=\d)/g, '$1 ') : '',
       delivcin: c.locataire?.delivcin || '',
       adressecli: c.locataire?.adressecli || '',
-      activite: c.locataire?.activite || ''
+      activite: c.locataire?.activite || '',
+      contact: c.contact || ''
     });
     setShowWizard(true);
     setStep(1);
@@ -3297,13 +3312,16 @@ export default function RedacteurHome() {
                       background: currentTheme.colors.backgroundTertiary,
                       borderBottom: `1px solid ${currentTheme.colors.border}`
                     }}>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>N° Convention</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '18%' }}>Client</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Montant</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Superficie</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Statut</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Date</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '24%' }}>Actions</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>N° Convention</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Client</th>
+                      {hasContactData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Contact</th>}
+                      {hasVilleData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Ville</th>}
+                      {hasQuartierData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Quartier</th>}
+                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Montant</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Superficie</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Statut</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Date</th>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '14%' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3330,6 +3348,15 @@ export default function RedacteurHome() {
                         <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
                           {c.locataire?.nomcli || 'N/A'}
                         </td>
+                        {hasContactData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {c.contact && c.contact.trim() !== '' && c.contact !== 'N/A' ? c.contact : '-'}
+                        </td>}
+                        {hasVilleData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée' ? c.batiment.ville : '-'}
+                        </td>}
+                        {hasQuartierData && <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
+                          {c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné' ? c.batiment.quartier : '-'}
+                        </td>}
                         <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 600 }}>
                           {Number(c.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
                         </td>
@@ -4587,6 +4614,23 @@ export default function RedacteurHome() {
                           required 
                           style={inputStyle}
                           placeholder="Profession ou activité"
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '8px', fontWeight: 500 }}>
+                          Contact
+                        </label>
+                        <input 
+                          className="form-control" 
+                          type="text"
+                          value={step2.contact} 
+                          onChange={e => {
+                            // Ne garder que les chiffres, espaces, + et -
+                            const value = e.target.value.replace(/[^0-9+\-\s]/g, '');
+                            setStep2({ ...step2, contact: value });
+                          }}
+                          style={inputStyle}
+                          placeholder="Ex: +261 34 12 345 67"
                         />
                     </div>
                   </div>

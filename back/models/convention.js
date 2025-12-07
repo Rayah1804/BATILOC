@@ -43,6 +43,11 @@ module.exports = function(sequelize, DataTypes) {
         model: 'locataire',
         key: 'codeCli'
       }
+    },
+    contact: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+      comment: 'Contact du locataire pour cette convention'
     }
   }, {
     sequelize,
