@@ -45,6 +45,7 @@ export default function RedacteurHome() {
   const [demandesModification, setDemandesModification] = useState([]);
   const [showBatimentDetail, setShowBatimentDetail] = useState(false);
   const [batimentForDetail, setBatimentForDetail] = useState(null);
+  const [loadingBatimentDetails, setLoadingBatimentDetails] = useState(false);
   const [showFullscreenMap, setShowFullscreenMap] = useState(false);
   
   // État pour les paramètres
@@ -437,10 +438,51 @@ export default function RedacteurHome() {
     return { lat: latitude, lng: longitude };
   }, [batimentForDetail]);
 
-  const openBatimentDetail = (batiment) => {
-    if (!batiment) return;
+  const openBatimentDetail = async (batiment) => {
+    if (!batiment) {
+      console.warn('openBatimentDetail: batiment is null or undefined');
+      return;
+    }
+    console.log('openBatimentDetail called with:', batiment);
     setBatimentForDetail(batiment);
     setShowBatimentDetail(true);
+    setLoadingBatimentDetails(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BATS}/${batiment.numBat}?_t=${Date.now()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        navigate('/auth');
+        return;
+      }
+
+      const result = await response.json();
+      if (result.status === 200 && result.data) {
+        setBatimentForDetail(result.data);
+      } else {
+        setMsg('Impossible de charger le détail du bâtiment');
+        setTimeout(() => setMsg(''), 2500);
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement du détail du bâtiment:', error);
+      setMsg('Erreur lors du chargement du détail du bâtiment');
+      setTimeout(() => setMsg(''), 2500);
+    } finally {
+      setLoadingBatimentDetails(false);
+    }
+  };
+
+  const closeBatimentDetail = () => {
+    setShowBatimentDetail(false);
+    setBatimentForDetail(null);
+    setLoadingBatimentDetails(false);
   };
 
   const onSubmitWizard = async () => {
@@ -654,7 +696,7 @@ export default function RedacteurHome() {
       console.log('✅ Résultat suppression:', result);
       
       if (result.status === 200) {
-        setMsg('Convention supprimée avec succès');
+        setMsg('✅ Convention supprimée avec succès');
         
         // Fermer le modal si ouvert
         if (selectedConv && selectedConv.numConv === numConvInt) {
@@ -669,11 +711,11 @@ export default function RedacteurHome() {
           await loadConventions();
         }, 100);
       } else {
-        setMsg(result.message || 'Erreur lors de la suppression');
+        setMsg('❌ ' + (result.message || 'Erreur lors de la suppression'));
       }
     } catch (e) {
       console.error('❌ Erreur lors de la suppression:', e);
-      setMsg('Erreur lors de la suppression de la convention: ' + (e.message || 'Erreur inconnue'));
+      setMsg('❌ Erreur lors de la suppression de la convention: ' + (e.message || 'Erreur inconnue'));
       
       // Si erreur d'authentification, rediriger vers login
       if (e.message && (e.message.includes('401') || e.message.includes('403'))) {
@@ -684,7 +726,7 @@ export default function RedacteurHome() {
       }
     } finally {
       setLoading(false);
-      setTimeout(() => setMsg(''), 3000);
+      setTimeout(() => setMsg(''), 5000);
     }
   };
 
@@ -3221,8 +3263,22 @@ export default function RedacteurHome() {
             </div>
 
             {msg && (
-              <div style={{ background: '#d4edda', color: '#155724', padding: '12px 16px', borderRadius: '8px', marginBottom: '24px', display: 'inline-flex', fontSize: '14px' }}>
-                {msg}
+              <div style={{ 
+                background: msg.includes('✅') ? '#d4edda' : msg.includes('❌') ? '#f8d7da' : '#d1ecf1', 
+                color: msg.includes('✅') ? '#155724' : msg.includes('❌') ? '#721c24' : '#0c5460', 
+                padding: '14px 18px', 
+                borderRadius: '10px', 
+                marginBottom: '24px', 
+                display: 'flex', 
+                alignItems: 'center',
+                gap: '10px',
+                fontSize: '15px',
+                fontWeight: 500,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                border: `1px solid ${msg.includes('✅') ? '#c3e6cb' : msg.includes('❌') ? '#f5c6cb' : '#bee5eb'}`
+              }}>
+                <i className={`fas ${msg.includes('✅') ? 'fa-check-circle' : msg.includes('❌') ? 'fa-exclamation-circle' : 'fa-info-circle'}`} style={{ fontSize: '18px' }}></i>
+                <span>{msg}</span>
               </div>
             )}
 
@@ -3909,147 +3965,290 @@ export default function RedacteurHome() {
           </div>
         )}
 
-        {/* Modal Détails Bâtiment (map) */}
+        {/* Modal Détails Bâtiment (complet comme AdminDash) */}
         {showBatimentDetail && batimentForDetail && (
           <div
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0, 0, 0, 0.65)',
+              backgroundColor: 'rgba(0, 0, 0, 0.65)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              zIndex: 1500,
+              padding: '24px',
+              zIndex: 9999,
               backdropFilter: 'blur(8px)',
               WebkitBackdropFilter: 'blur(8px)'
             }}
-            onClick={() => {
-              setShowBatimentDetail(false);
-              setShowFullscreenMap(false);
-              setBatimentForDetail(null);
-            }}
+            onClick={closeBatimentDetail}
           >
             <div
               style={{
-                background: currentTheme.colors.cardBackground,
+                backgroundColor: currentTheme.colors.cardBackground,
+                border: `1px solid ${currentTheme.colors.border}`,
                 borderRadius: '18px',
-                padding: '24px',
-                width: '90%',
                 maxWidth: '720px',
-                maxHeight: '90vh',
+                width: '100%',
+                maxHeight: '95vh',
                 overflowY: 'auto',
                 boxShadow: currentTheme.shadows.xl,
-                border: `1px solid ${currentTheme.colors.border}`
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '24px', borderBottom: `1px solid ${currentTheme.colors.border}` }}>
                 <div>
                   <p style={{ margin: 0, fontSize: '14px', color: currentTheme.colors.textTertiary }}>Bâtiment n° {batimentForDetail.numBat}</p>
-                  <h2 style={{ margin: '4px 0 0', color: currentTheme.colors.primary }}>{batimentForDetail.adresse || 'Adresse non renseignée'}</h2>
+                  <h2 style={{ margin: '4px 0 0', fontSize: '28px', color: currentTheme.colors.primary }}>
+                    {batimentForDetail.adresse || 'Adresse non renseignée'}
+                  </h2>
                 </div>
                 <button
-                  onClick={() => {
-                    setShowBatimentDetail(false);
-                    setShowFullscreenMap(false);
-                    setBatimentForDetail(null);
-                  }}
+                  onClick={closeBatimentDetail}
                   style={{
                     border: 'none',
                     background: 'transparent',
+                    color: currentTheme.colors.text,
                     fontSize: '24px',
                     cursor: 'pointer',
-                    color: currentTheme.colors.textTertiary
+                    lineHeight: 1,
                   }}
-                  aria-label="Fermer la modale de détails bâtiment"
+                  aria-label="Fermer les détails du bâtiment"
                 >
                   ×
                 </button>
               </div>
 
-              <div style={{ position: 'relative', borderRadius: '16px', border: `1px solid ${currentTheme.colors.border}`, padding: '12px', backgroundColor: currentTheme.colors.backgroundSecondary }}>
-                {batimentMapCoords ? (
-                  <MapContainer
-                    key={`${batimentMapCoords.lat}-${batimentMapCoords.lng}`}
-                    center={[batimentMapCoords.lat, batimentMapCoords.lng]}
-                    zoom={16}
-                    scrollWheelZoom={false}
-                    style={{ width: '100%', height: '300px', borderRadius: '12px' }}
-                  >
-                    <TileLayer
-                      attribution='© OpenStreetMap contributors'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-                    <Marker position={[batimentMapCoords.lat, batimentMapCoords.lng]} icon={defaultMarkerIcon}>
-                      <Popup>
-                        Bâtiment n° {batimentForDetail.numBat}
-                      </Popup>
-                    </Marker>
-                  </MapContainer>
-                ) : (
-                  <div style={{ width: '100%', height: '300px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: currentTheme.colors.textTertiary }}>
-                    Coordonnées géographiques non renseignées
-                  </div>
-                )}
-                {batimentMapCoords && (
-                  <button
-                    onClick={() => setShowFullscreenMap(true)}
+              {loadingBatimentDetails ? (
+                <div style={{ padding: '48px', textAlign: 'center', color: currentTheme.colors.textTertiary }}>
+                  Chargement...
+                </div>
+              ) : (
+                <div style={{ padding: '24px', display: 'grid', gap: '16px' }}>
+                  <div
                     style={{
-                      position: 'absolute',
-                      right: '16px',
-                      top: '16px',
-                      padding: '8px 14px',
-                      borderRadius: '999px',
-                      border: 'none',
-                      backgroundColor: '#05c46b',
-                      color: '#fff',
-                      fontSize: '12px',
-                      textTransform: 'uppercase',
-                      fontWeight: 600,
-                      letterSpacing: '0.04em',
-                      cursor: 'pointer',
-                      boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
+                      position: 'relative',
+                      borderRadius: '16px',
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      padding: '12px',
+                      backgroundColor: currentTheme.colors.backgroundSecondary,
+                      overflow: 'hidden',
+                      boxShadow: currentTheme.shadows.sm
                     }}
                   >
-                    <span style={{ fontSize: '14px' }}>🗺️</span> Voir la map
-                  </button>
-                )}
-              </div>
+                    {batimentMapCoords ? (
+                      <MapContainer
+                        key={`${batimentMapCoords.lat}-${batimentMapCoords.lng}`}
+                        center={[batimentMapCoords.lat, batimentMapCoords.lng]}
+                        zoom={16}
+                        scrollWheelZoom={false}
+                        style={{ width: '100%', height: '260px', borderRadius: '12px' }}
+                      >
+                        <TileLayer
+                          attribution='© OpenStreetMap contributors'
+                          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                        />
+                        <Marker position={[batimentMapCoords.lat, batimentMapCoords.lng]} icon={defaultMarkerIcon}>
+                          <Popup>
+                            Bâtiment n° {batimentForDetail.numBat}
+                          </Popup>
+                        </Marker>
+                      </MapContainer>
+                    ) : (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '260px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: currentTheme.colors.textTertiary,
+                          fontSize: '14px'
+                        }}
+                      >
+                        Coordonnées géographiques non renseignées
+                      </div>
+                    )}
+                    {batimentMapCoords && (
+                      <button
+                        onClick={() => setShowFullscreenMap(true)}
+                        style={{
+                          position: 'absolute',
+                          right: '16px',
+                          top: '16px',
+                          padding: '8px 14px',
+                          borderRadius: '999px',
+                          border: 'none',
+                          backgroundColor: '#05c46b',
+                          color: '#fff',
+                          fontSize: '12px',
+                          textTransform: 'uppercase',
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <span style={{ fontSize: '14px' }}>🗺️</span> Voir la map
+                      </button>
+                    )}
+                    {batimentMapCoords && (
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '12px',
+                          fontSize: '12px',
+                          color: currentTheme.colors.textTertiary
+                        }}
+                      >
+                        <span>Lat: {batimentMapCoords.lat.toFixed(6)} · Lon: {batimentMapCoords.lng.toFixed(6)}</span>
+                        <a
+                          href={`https://www.openstreetmap.org/?mlat=${batimentMapCoords.lat}&mlon=${batimentMapCoords.lng}#map=18/${batimentMapCoords.lat}/${batimentMapCoords.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: currentTheme.colors.primary, fontWeight: 600 }}
+                        >
+                          Ouvrir dans OpenStreetMap
+                        </a>
+                      </div>
+                    )}
+                  </div>
 
-              <div style={{ marginTop: '18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
-                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
-                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Ville</span>
-                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>{batimentForDetail.ville || 'Non renseignée'}</p>
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '260px',
+                      borderRadius: '14px',
+                      backgroundColor: '#f2f2f2',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                      border: `1px solid ${currentTheme.colors.border}`
+                    }}
+                  >
+                    {batimentForDetail.image ? (
+                      <img
+                        src={`data:image/jpeg;base64,${batimentForDetail.image}`}
+                        alt={`Bâtiment ${batimentForDetail.numBat}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <div style={{ color: currentTheme.colors.textTertiary, fontSize: '13px' }}>Pas d'image disponible</div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Montant</p>
+                      <p style={{ margin: '6px 0 0', fontSize: '18px', color: currentTheme.colors.text, fontWeight: 600 }}>
+                        {typeof batimentForDetail.montant === 'number'
+                          ? `${batimentForDetail.montant.toLocaleString('fr-FR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })} Ar`
+                          : (batimentForDetail.montant ?? 'Non renseigné')}
+                      </p>
+                    </div>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Superficie</p>
+                      <p style={{ margin: '6px 0 0', fontSize: '18px', color: currentTheme.colors.text, fontWeight: 600 }}>
+                        {batimentForDetail.superficie 
+                          ? `${batimentForDetail.superficie.toLocaleString('fr-FR', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2
+                            })} m²`
+                          : 'Non renseigné'}
+                      </p>
+                    </div>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut technique</p>
+                      <p
+                        style={{
+                          margin: '6px 0 0',
+                          fontSize: '18px',
+                          fontWeight: 600,
+                          color: batimentForDetail.statut ? '#0d6b3a' : '#dc3545'
+                        }}
+                      >
+                        {batimentForDetail.statut ? 'Actif' : 'Inactif'}
+                      </p>
+                      {!batimentForDetail.statut && batimentForDetail.motifInactivite && (
+                        <p style={{ margin: '8px 0 0', fontSize: '12px', color: currentTheme.colors.textTertiary, fontStyle: 'italic' }}>
+                          Motif: {batimentForDetail.motifInactivite}
+                        </p>
+                      )}
+                    </div>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut d'utilisation</p>
+                      <p
+                        style={{
+                          margin: '6px 0 0',
+                          fontSize: '18px',
+                          fontWeight: 600,
+                          color: batimentForDetail.statutUtilisation === 'indisponible' || batimentForDetail.estIndisponible 
+                            ? '#991b1b' 
+                            : (batimentForDetail.statutUtilisation === 'libre' || batimentForDetail.estLibre) 
+                              ? '#0369a1' 
+                              : '#b45309'
+                        }}
+                      >
+                        {batimentForDetail.statutUtilisation === 'indisponible' || batimentForDetail.estIndisponible 
+                          ? '⛔ Indisponible' 
+                          : (batimentForDetail.statutUtilisation === 'libre' || batimentForDetail.estLibre) 
+                            ? '🟢 Libre' 
+                            : '🔴 Déjà alloué'}
+                      </p>
+                    </div>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Ville</p>
+                      <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                        {batimentForDetail.ville || ''}
+                      </p>
+                    </div>
+                    <div style={{ padding: '12px 16px', borderRadius: '10px', backgroundColor: currentTheme.colors.backgroundTertiary }}>
+                      <p style={{ margin: 0, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Quartier</p>
+                      <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                        {batimentForDetail.quartier || ''}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '16px', borderRadius: '12px', border: `1px solid ${currentTheme.colors.border}`, backgroundColor: currentTheme.colors.backgroundSecondary }}>
+                    <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: currentTheme.colors.text }}>Informations complémentaires</p>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Numéro du bâtiment : {batimentForDetail.numBat}
+                    </p>
+                    <p style={{ margin: '6px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Adresse : {batimentForDetail.adresse || 'Non renseignée'}
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                    <button
+                      onClick={closeBatimentDetail}
+                      style={{
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        border: `1px solid ${currentTheme.colors.border}`,
+                        backgroundColor: currentTheme.colors.backgroundSecondary,
+                        color: currentTheme.colors.text,
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '14px'
+                      }}
+                    >
+                      Fermer
+                    </button>
+                  </div>
                 </div>
-                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
-                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Quartier</span>
-                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>{batimentForDetail.quartier || 'Non renseigné'}</p>
-                </div>
-                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
-                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Montant</span>
-                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>{Number(batimentForDetail.montant || 0).toLocaleString('fr-FR')} Ar</p>
-                </div>
-                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
-                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Superficie</span>
-                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600 }}>
-                    {batimentForDetail.superficie 
-                      ? `${Number(batimentForDetail.superficie).toLocaleString('fr-FR', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2
-                        })} m²`
-                      : 'Non renseigné'}
-                  </p>
-                </div>
-                <div style={{ padding: '14px', borderRadius: '12px', backgroundColor: currentTheme.colors.backgroundTertiary, border: `1px solid ${currentTheme.colors.border}` }}>
-                  <span style={{ fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut</span>
-                  <p style={{ margin: '6px 0 0', fontSize: '16px', fontWeight: 600, color: batimentForDetail.statut ? '#0d6b3a' : '#dc3545' }}>
-                    {batimentForDetail.statut ? 'Actif' : 'Inactif'}
-                  </p>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}
@@ -4065,7 +4264,10 @@ export default function RedacteurHome() {
               justifyContent: 'center',
               zIndex: 2100
             }}
-            onClick={() => setShowFullscreenMap(false)}
+            onClick={() => {
+              setShowFullscreenMap(false);
+              closeBatimentDetail();
+            }}
           >
             <div
               style={{
@@ -4087,7 +4289,10 @@ export default function RedacteurHome() {
                   Carte plein écran - Bâtiment {batimentForDetail?.numBat}
                 </h3>
                 <button
-                  onClick={() => setShowFullscreenMap(false)}
+                  onClick={() => {
+              setShowFullscreenMap(false);
+              closeBatimentDetail();
+            }}
                   style={{
                     border: 'none',
                     background: 'transparent',
