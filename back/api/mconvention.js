@@ -122,6 +122,26 @@ router.get("/", async (req, res) => {
     const batimentsById = new Map();
     const locatairesById = new Map();
 
+    // Recalculer le statut des conventions en fonction des factures payées (source de vérité)
+    const numConvs = rows.map(r => r.numConv);
+    if (numConvs.length > 0) {
+      const facturesPayees = await Facture.findAll({
+        attributes: ['numConv', [sequelize.fn('COUNT', sequelize.col('numFact')), 'paidCount']],
+        where: { numConv: { [Op.in]: numConvs }, statutPaiement: true },
+        group: ['numConv']
+      });
+      const paidMap = new Map(facturesPayees.map(f => [f.numConv, Number(f.get('paidCount')) || 0]));
+
+      // Mettre à jour en base si le statut calculé diffère
+      await Promise.all(rows.map(async (conv) => {
+        const shouldBeConfirmed = (paidMap.get(conv.numConv) || 0) > 0;
+        if (conv.statutConv !== shouldBeConfirmed) {
+          await conv.update({ statutConv: shouldBeConfirmed });
+          conv.statutConv = shouldBeConfirmed;
+        }
+      }));
+    }
+
     // prefetch related entities
     const numBats = [...new Set(rows.map(r => r.numBat))];
     const codeClis = [...new Set(rows.map(r => r.codeCli))];
@@ -446,6 +466,32 @@ router.delete("/:numConv", async (req, res) => {
       }
       console.log('❌ Convention non trouvée:', numConv);
       return res.status(404).json({ status: 404, message: "Convention non trouvée" });
+    }
+
+    // Vérifier si la convention est "en attente" (statutConv = false)
+    // Les conventions en attente ne peuvent pas être supprimées
+    if (conv.statutConv === false) {
+      await t.rollback();
+      
+      // Créer une notification (on peut la logger pour l'instant)
+      const notification = {
+        type: 'suppression_convention_bloquee',
+        numConv: numConv,
+        message: `Suppression de la convention ${numConv} bloquée : convention encore en attente`,
+        date: new Date().toISOString()
+      };
+      console.log('📢 Notification créée:', JSON.stringify(notification, null, 2));
+      
+      return res.status(409).json({
+        message: "Impossible de supprimer : cette convention est encore en attente.",
+        status: 409,
+        details: {
+          numConv: numConv,
+          statutConv: false,
+          statutLibelle: "En attente",
+          notification: "Une notification a été créée pour informer qu'il faut d'abord valider ou rejeter la convention."
+        }
+      });
     }
 
     // Charger les modèles

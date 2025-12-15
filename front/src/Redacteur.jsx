@@ -183,6 +183,69 @@ export default function RedacteurHome() {
     return convModifications.length;
   };
 
+  // Crée (si besoin) une demande de modification pour cette convention (visible côté admin)
+  const ensureEditRequestRecorded = async (numConv, raison = 'Limite de modifications atteinte (2 tentatives)') => {
+    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+    const demandes = JSON.parse(localStorage.getItem('demandesModification') || '[]');
+
+    // Ne rien faire si une demande est déjà en attente pour cette convention
+    const existingPending = demandes.find(d => d.convention === numConv && d.statut === 'en_attente' && !d.utilisee);
+    if (existingPending) {
+      return;
+    }
+
+    // Tenter d'envoyer à l'API (si disponible)
+    try {
+      const token = localStorage.getItem('token');
+      const API_DEMANDES = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/demandes-modification`;
+      await fetch(API_DEMANDES, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          type: 'modification',
+          raison,
+          demandeur: userData.matricule || userData.nom || 'Rédacteur',
+          convention: numConv
+        })
+      });
+    } catch (apiError) {
+      // Silencieux si l'API n'est pas dispo (fallback localStorage)
+    }
+
+    // Enregistrer localement la demande pour qu'elle remonte côté admin
+    demandes.push({
+      id: Date.now(),
+      type: 'modification',
+      raison,
+      demandeur: userData.nom || 'Rédacteur',
+      matricule: userData.matricule || 'N/A',
+      convention: numConv,
+      statut: 'en_attente',
+      date: new Date().toISOString(),
+      utilisee: false
+    });
+    localStorage.setItem('demandesModification', JSON.stringify(demandes));
+    setDemandesModification(demandes);
+
+    // Historiser
+    const historique = JSON.parse(localStorage.getItem('historiqueActivites') || '[]');
+    historique.push({
+      id: Date.now(),
+      utilisateur: userData.nom || 'Rédacteur',
+      matricule: userData.matricule || 'N/A',
+      action: 'Demande de modification',
+      type: 'Convention',
+      description: `Demande d'autorisation (auto) pour la convention ${numConv}`,
+      date: new Date().toISOString(),
+      details: { raison, convention: numConv },
+      statut: 'En attente'
+    });
+    localStorage.setItem('historiqueActivites', JSON.stringify(historique));
+  };
+
   // Fonction pour enregistrer une modification dans l'historique
   const enregistrerModificationHistorique = (convention, action) => {
     const userData = JSON.parse(localStorage.getItem('user') || '{}');
@@ -506,7 +569,9 @@ export default function RedacteurHome() {
           );
           
           if (!demandeApprouvee) {
-            setMsg(`Limite de 2 modifications atteinte pour la convention ${editingConv.numConv}. Veuillez demander une autorisation à l'administrateur.`);
+            // Créer automatiquement une demande pour l'admin
+            await ensureEditRequestRecorded(editingConv.numConv);
+            setMsg(`Limite de 2 modifications atteinte pour la convention ${editingConv.numConv}. Demande envoyée à l'administrateur.`);
             setShowEditRequestModal(true);
             setLoading(false);
             return;
@@ -634,8 +699,33 @@ export default function RedacteurHome() {
 
     setLoading(true);
     try {
-      // Supprimer toutes les conventions une par une
-      const conventionsToDelete = [...conventions];
+      // Filtrer les conventions : exclure celles qui sont "en attente" (statutConv = false)
+      const conventionsToDelete = conventions.filter(conv => conv.statutConv === true);
+      const conventionsEnAttente = conventions.filter(conv => conv.statutConv === false);
+      
+      if (conventionsToDelete.length === 0) {
+        setMsg('Aucune convention supprimable. Toutes les conventions sont encore en attente.');
+        setLoading(false);
+        setTimeout(() => setMsg(''), 5000);
+        return;
+      }
+      
+      if (conventionsEnAttente.length > 0) {
+        const confirmMsg = `${conventionsEnAttente.length} convention(s) en attente seront exclues de la suppression. Voulez-vous continuer ?`;
+        const shouldContinue = await confirm({
+          title: '⚠️ Conventions en attente',
+          message: confirmMsg,
+          type: 'warning',
+          confirmText: 'Continuer',
+          cancelText: 'Annuler'
+        });
+        
+        if (!shouldContinue) {
+          setLoading(false);
+          return;
+        }
+      }
+      
       let successCount = 0;
       let errorCount = 0;
 
@@ -652,7 +742,11 @@ export default function RedacteurHome() {
       }
 
       if (successCount > 0) {
-        setMsg(`✅ ${successCount} convention(s) supprimée(s)${errorCount > 0 ? `. ${errorCount} erreur(s).` : ' avec succès.'}`);
+        let msg = `✅ ${successCount} convention(s) supprimée(s)${errorCount > 0 ? `. ${errorCount} erreur(s).` : ' avec succès.'}`;
+        if (conventionsEnAttente.length > 0) {
+          msg += ` ${conventionsEnAttente.length} convention(s) en attente exclue(s).`;
+        }
+        setMsg(msg);
         // Recharger les conventions
         await loadConventions();
         setConventions([]);
@@ -684,6 +778,13 @@ export default function RedacteurHome() {
       return;
     }
     
+    // Vérifier si la convention est "en attente" (statutConv = false)
+    if (convention.statutConv === false) {
+      setMsg('❌ Impossible de supprimer : cette convention est encore en attente.');
+      setTimeout(() => setMsg(''), 5000);
+      return;
+    }
+    
     setLoading(true);
     try {
       console.log('🗑️ Suppression de la convention:', numConvInt);
@@ -710,6 +811,9 @@ export default function RedacteurHome() {
         setTimeout(async () => {
           await loadConventions();
         }, 100);
+      } else if (result.status === 409) {
+        // Convention en attente - ne peut pas être supprimée
+        setMsg('❌ ' + (result.message || 'Impossible de supprimer : cette convention est encore en attente.'));
       } else {
         setMsg('❌ ' + (result.message || 'Erreur lors de la suppression'));
       }
@@ -730,7 +834,7 @@ export default function RedacteurHome() {
     }
   };
 
-  const onEditConv = (c) => {
+  const onEditConv = async (c) => {
     // Vérifier la limite de 2 modifications par convention
     const countForConv = getEditCountForConv(c.numConv);
     if (countForConv >= 2) {
@@ -743,9 +847,10 @@ export default function RedacteurHome() {
       );
       
       if (!demandeApprouvee) {
-        setMsg(`Limite de 2 modifications atteinte pour la convention ${c.numConv}. Veuillez demander une autorisation à l'administrateur.`);
-        setShowEditRequestModal(true);
-        setEditRequestReason('');
+        // Demande automatique envoyée à l'admin, notification utilisateur
+        await ensureEditRequestRecorded(c.numConv, 'Limite de 2 modifications atteinte (demande auto)');
+        setMsg(`Demande envoyée automatiquement à l'administrateur pour la convention ${c.numConv}. En attente d'approbation.`);
+        // Pas de blocage du bouton : il reste cliquable, mais on sort tant que l'admin n'a pas approuvé
         return;
       }
     }
@@ -3146,7 +3251,7 @@ export default function RedacteurHome() {
             {/* Boutons d'action */}
             <div style={{ 
               display: 'grid', 
-              gridTemplateColumns: 'repeat(3, 1fr)', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', 
               gap: '20px', 
               marginBottom: '32px' 
             }}>
@@ -3217,48 +3322,6 @@ export default function RedacteurHome() {
                   <span style={{ fontSize: '16px', fontWeight: 600 }}>Exporter les données</span>
                 </div>
                 <div style={{ fontSize: '13px', color: '#6b7280' }}>Télécharger un rapport</div>
-              </button>
-
-              {/* Bouton Effacer tout */}
-              <button
-                onClick={onEffacerTout}
-                disabled={loading || conventions.length === 0}
-                style={{
-                  background: loading || conventions.length === 0 
-                    ? currentTheme.colors.backgroundTertiary 
-                    : 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-                  border: `1px solid ${loading || conventions.length === 0 ? currentTheme.colors.border : '#ef4444'}`,
-                  transition: 'all 0.2s ease',
-                  color: loading || conventions.length === 0 ? currentTheme.colors.textTertiary : 'white',
-                  borderRadius: '12px',
-                  padding: '24px',
-                  cursor: loading || conventions.length === 0 ? 'not-allowed' : 'pointer',
-                  textAlign: 'left',
-                  boxShadow: loading || conventions.length === 0 ? 'none' : '0 4px 12px rgba(239, 68, 68, 0.3)',
-                  opacity: loading || conventions.length === 0 ? 0.6 : 1
-                }}
-                onMouseEnter={(e) => {
-                  if (!loading && conventions.length > 0) {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(239, 68, 68, 0.4)';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!loading && conventions.length > 0) {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
-                  }
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                  <i className="fas fa-trash-alt" style={{ fontSize: '20px' }}></i>
-                  <span style={{ fontSize: '16px', fontWeight: 600 }}>Effacer tout</span>
-                </div>
-                <div style={{ fontSize: '13px', opacity: 0.9 }}>
-                  {conventions.length === 0 
-                    ? 'Aucune convention à supprimer' 
-                    : `Supprimer ${conventions.length} convention(s)`}
-                </div>
               </button>
             </div>
 

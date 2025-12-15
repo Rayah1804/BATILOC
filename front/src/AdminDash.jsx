@@ -758,7 +758,15 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteConvention = async (numConv) => {
-    // Suppression directe sans confirmation
+    // Demander une confirmation avant de supprimer la convention
+    const confirmed = await confirm({
+      title: 'Supprimer la convention',
+      message: `Êtes-vous sûr de vouloir supprimer la convention ${numConv} ?\nCette action est irréversible.`,
+      type: 'danger',
+      confirmText: 'Supprimer',
+      cancelText: 'Annuler'
+    });
+    if (!confirmed) return;
 
     setLoading(true);
     try {
@@ -800,6 +808,9 @@ export default function AdminDashboard() {
           statut: 'Succès'
         });
         localStorage.setItem('historiqueActivites', JSON.stringify(historique));
+      } else if (result.status === 409) {
+        // Convention en attente - ne peut pas être supprimée
+        setMsg(result.message || 'Impossible de supprimer : cette convention est encore en attente.');
       } else {
         setMsg(result.message || 'Erreur lors de la suppression');
       }
@@ -4261,24 +4272,33 @@ export default function AdminDashboard() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (!c.statutConv) {
+                                    setMsg('Impossible de supprimer : cette convention est encore en attente.');
+                                    setTimeout(() => setMsg(''), 3000);
+                                    return;
+                                  }
                                   handleDeleteConvention(c.numConv);
                                 }}
+                                disabled={!c.statutConv}
                                 style={{
                                   background: 'none',
                                   border: 'none',
-                                  color: '#dc3545',
-                                  cursor: 'pointer',
+                                  color: !c.statutConv ? '#9ca3af' : '#dc3545',
+                                  cursor: !c.statutConv ? 'not-allowed' : 'pointer',
                                   padding: '8px',
                                   borderRadius: '6px',
-                                  transition: 'all 0.2s ease'
+                                  transition: 'all 0.2s ease',
+                                  opacity: !c.statutConv ? 0.5 : 1
                                 }}
                                 onMouseEnter={(e) => {
-                                  e.currentTarget.style.background = isDark ? 'rgba(220, 53, 69, 0.2)' : '#fee';
+                                  if (c.statutConv) {
+                                    e.currentTarget.style.background = isDark ? 'rgba(220, 53, 69, 0.2)' : '#fee';
+                                  }
                                 }}
                                 onMouseLeave={(e) => {
                                   e.currentTarget.style.background = 'none';
                                 }}
-                                title="Supprimer"
+                                title={!c.statutConv ? "Impossible de supprimer : convention en attente" : "Supprimer"}
                               >
                                 <i className="fas fa-trash-alt" style={{ fontSize: '16px' }}></i>
                               </button>
@@ -4489,20 +4509,27 @@ export default function AdminDashboard() {
                   </button>
                   <button
                     onClick={() => {
+                      if (!selectedConvention.statutConv) {
+                        setMsg('Impossible de supprimer : cette convention est encore en attente.');
+                        setTimeout(() => setMsg(''), 3000);
+                        return;
+                      }
                       handleDeleteConvention(selectedConvention.numConv);
                       setSelectedConvention(null);
                     }}
+                    disabled={!selectedConvention.statutConv}
                     style={{
                       padding: '12px 24px',
-                      backgroundColor: '#dc3545',
+                      backgroundColor: !selectedConvention.statutConv ? '#9ca3af' : '#dc3545',
                       color: 'white',
                       border: 'none',
                       borderRadius: '8px',
                       fontWeight: '600',
                       fontSize: '14px',
-                      cursor: 'pointer',
+                      cursor: !selectedConvention.statutConv ? 'not-allowed' : 'pointer',
                       transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 4px rgba(220, 53, 69, 0.2)',
+                      boxShadow: !selectedConvention.statutConv ? 'none' : '0 2px 4px rgba(220, 53, 69, 0.2)',
+                      opacity: !selectedConvention.statutConv ? 0.6 : 1
                     }}
                     onMouseEnter={(e) => {
                       e.target.style.backgroundColor = '#c82333';

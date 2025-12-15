@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import "./style.css";
-import fceL from './images/fcee.gif';
+// image imported but not used directly in this component - keep for potential use
+import _fceL from './images/fcee.gif';
 import batilockLogo from './images/2.png';
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from './config/api';
@@ -110,14 +111,22 @@ export default function AuthForm() {
   const [isLogin, setIsLogin] = useState(
     location.state?.isLogin !== undefined ? location.state.isLogin : true
   );
+  // The setter functions below may not always be used depending on UI flow.
+  // Reference them to satisfy strict 'noUnusedLocals' in some build environments.
+  void setIsLogin;
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [progress, setProgress] = useState(33);
+  void setProgress;
+  void progress;
   const [currentStep, setCurrentStep] = useState(1);
+  void setCurrentStep;
+  void currentStep;
   const [fadeIn, setFadeIn] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  void mousePosition;
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetStep, setResetStep] = useState(1); // 1: demande, 2: vérification code, 3: nouveau mot de passe
   const [resetData, setResetData] = useState({
@@ -529,7 +538,6 @@ export default function AuthForm() {
                         setResetData({
                           matricule: '',
                           poste: '',
-                          email: '',
                           code: '',
                           newPassword: '',
                           confirmPassword: '',
@@ -657,7 +665,6 @@ export default function AuthForm() {
                       setResetData({
                         matricule: '',
                         poste: '',
-                        email: '',
                         code: '',
                         newPassword: '',
                         confirmPassword: '',

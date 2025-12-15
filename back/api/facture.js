@@ -359,31 +359,27 @@ router.put("/:numFact", requireRole('caissier', 'administrateur'), async (req, r
 
     await facture.update(updates, { transaction: t });
 
-    // Mettre à jour automatiquement le statut de la convention
+    // Mettre à jour automatiquement le statut de la convention en recalculant sur toutes les factures
     const convention = await Convention.findByPk(facture.numConv, { transaction: t });
     
     if (convention && statutPaiement !== undefined) {
-      if (updates.statutPaiement === true && oldStatutPaiement === false) {
-        // Facture payée : passer de "En attente" à "Confirmé"
-        if (convention.statutConv === false) {
-          await convention.update({ statutConv: true }, { transaction: t });
-          console.log(`✅ Statut de la convention ${convention.numConv} mis à jour: En attente -> Confirmé`);
-        }
-      } else if (updates.statutPaiement === false && oldStatutPaiement === true) {
-        // Facture annulée (retour en arrière) : vérifier s'il reste des factures payées
-        const facturesPayees = await Facture.count({
-          where: {
-            numConv: convention.numConv,
-            statutPaiement: true
-          },
-          transaction: t
-        });
-        
-        // Si aucune facture n'est payée, repasser à "En attente"
-        if (facturesPayees === 0 && convention.statutConv === true) {
-          await convention.update({ statutConv: false }, { transaction: t });
-          console.log(`✅ Statut de la convention ${convention.numConv} mis à jour: Confirmé -> En attente (aucune facture payée)`);
-        }
+      const facturesPayees = await Facture.count({
+        where: {
+          numConv: convention.numConv,
+          statutPaiement: true
+        },
+        transaction: t
+      });
+
+      const previousStatutConv = !!convention.statutConv;
+      const shouldBeConfirmed = facturesPayees > 0;
+
+      if (previousStatutConv !== shouldBeConfirmed) {
+        await convention.update({ statutConv: shouldBeConfirmed }, { transaction: t });
+        console.log(
+          `✅ Statut de la convention ${convention.numConv} mis à jour: ` +
+          `${previousStatutConv ? 'Confirmé' : 'En attente'} -> ${shouldBeConfirmed ? 'Confirmé' : 'En attente'}`
+        );
       }
     }
 
