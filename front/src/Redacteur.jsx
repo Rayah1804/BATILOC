@@ -3822,6 +3822,127 @@ export default function RedacteurHome() {
                 </div>
               </div>
 
+              {/* Bloc demande de modification quand la limite est atteinte */}
+              {(() => {
+                const countForConv = getEditCountForConv(selectedConv.numConv);
+                const demandesForConv = demandesModification.filter(d => d.convention === selectedConv.numConv);
+                const demandeApprouvee = demandesForConv.find(d => d.statut === 'approuvee' && !d.utilisee);
+                const demandeEnAttente = demandesForConv.find(d => d.statut === 'en_attente' && !d.utilisee);
+                const demandeRefusee = demandesForConv.find(d => d.statut === 'refusee' && !d.utilisee);
+                const limitReached = countForConv >= 2;
+
+                if (!limitReached && demandesForConv.length === 0) return null;
+
+                const statusBadge = (label, color) => (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: color.bg,
+                    color: color.text
+                  }}>
+                    <i className="fas fa-info-circle"></i>
+                    {label}
+                  </span>
+                );
+
+                return (
+                  <div style={{
+                    marginBottom: 24,
+                    padding: 16,
+                    borderRadius: 12,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    background: isDark ? 'rgba(245, 158, 11, 0.08)' : '#fffbeb',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <i className="fas fa-exclamation-triangle" style={{ color: '#f59e0b' }} />
+                      <div style={{ fontWeight: 700, color: currentTheme.colors.text }}>
+                        Limite de modifications atteinte ({countForConv}/2)
+                      </div>
+                      {limitReached && demandeApprouvee && statusBadge('Demande approuvée', { bg: '#dcfce7', text: '#166534' })}
+                      {limitReached && demandeEnAttente && statusBadge('Demande en attente', { bg: '#fef3c7', text: '#92400e' })}
+                      {limitReached && demandeRefusee && statusBadge('Demande refusée', { bg: '#fee2e2', text: '#991b1b' })}
+                    </div>
+
+                    {demandesForConv.length > 0 && (
+                      <div style={{ fontSize: 13, color: currentTheme.colors.textSecondary, display: 'grid', gap: 6 }}>
+                        {demandesForConv.map(d => (
+                          <div key={d.id} style={{
+                            padding: '8px 10px',
+                            borderRadius: 10,
+                            background: isDark ? 'rgba(0,0,0,0.08)' : '#f8fafc',
+                            border: `1px dashed ${currentTheme.colors.border}`
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                              <span style={{ fontWeight: 600, color: currentTheme.colors.text }}>
+                                Demande du {new Date(d.date || d.id).toLocaleDateString('fr-FR')}
+                              </span>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: (() => {
+                                if (d.statut === 'approuvee') return '#166534';
+                                if (d.statut === 'refusee') return '#b91c1c';
+                                return '#92400e';
+                              })() }}>
+                                {d.statut === 'approuvee' ? 'Approuvée' : d.statut === 'refusee' ? 'Refusée' : 'En attente'}
+                              </span>
+                            </div>
+                            <div style={{ color: currentTheme.colors.textSecondary, lineHeight: 1.4 }}>
+                              Raison : {d.raison || '—'}
+                            </div>
+                            {d.utilisee && (
+                              <div style={{ marginTop: 6, fontSize: 12, color: currentTheme.colors.textTertiary }}>
+                                (Autorisation déjà utilisée)
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {limitReached && !demandeApprouvee && (
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {demandeEnAttente ? (
+                          <span style={{ fontSize: 13, color: currentTheme.colors.text }}>
+                            Une demande est déjà en attente d'approbation.
+                          </span>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: 13, color: currentTheme.colors.text }}>
+                              Envoyez une demande d'autorisation pour continuer la modification.
+                            </span>
+                            <button
+                              onClick={() => {
+                                setEditingConv(selectedConv);
+                                setShowEditRequestModal(true);
+                                setEditRequestReason('');
+                              }}
+                              style={{
+                                padding: '10px 14px',
+                                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: 10,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)'
+                              }}
+                            >
+                              Demander une autorisation
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Actions */}
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', paddingTop: '24px', borderTop: `1px solid ${currentTheme.colors.border}` }}>
                 <button
@@ -4292,6 +4413,133 @@ export default function RedacteurHome() {
                       Adresse : {batimentForDetail.adresse || 'Non renseignée'}
                     </p>
                   </div>
+
+                  {(() => {
+                    // Trouver une convention liée à ce bâtiment (priorité à la convention sélectionnée)
+                    const conventionForBatiment = (() => {
+                      if (selectedConv && selectedConv.numBat === batimentForDetail.numBat) return selectedConv;
+                      return conventions.find(c => c.numBat === batimentForDetail.numBat) || null;
+                    })();
+
+                    if (!conventionForBatiment) return null;
+
+                    const countForConv = getEditCountForConv(conventionForBatiment.numConv);
+                    const demandesForConv = demandesModification.filter(d => d.convention === conventionForBatiment.numConv);
+                    const demandeApprouvee = demandesForConv.find(d => d.statut === 'approuvee' && !d.utilisee);
+                    const demandeEnAttente = demandesForConv.find(d => d.statut === 'en_attente' && !d.utilisee);
+                    const demandeRefusee = demandesForConv.find(d => d.statut === 'refusee' && !d.utilisee);
+                    const limitReached = countForConv >= 2;
+
+                    if (!limitReached && demandesForConv.length === 0) return null;
+
+                    const statusBadge = (label, color) => (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 10px',
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        background: color.bg,
+                        color: color.text
+                      }}>
+                        <i className="fas fa-info-circle"></i>
+                        {label}
+                      </span>
+                    );
+
+                    return (
+                      <div style={{
+                        padding: 16,
+                        borderRadius: 12,
+                        border: `1px dashed ${currentTheme.colors.border}`,
+                        background: isDark ? 'rgba(245, 158, 11, 0.08)' : '#fffbeb',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                          <i className="fas fa-exclamation-triangle" style={{ color: '#f59e0b' }} />
+                          <div style={{ fontWeight: 700, color: currentTheme.colors.text }}>
+                            Limite de modifications atteinte pour la convention {formatConventionNumber(conventionForBatiment)} ({countForConv}/2)
+                          </div>
+                          {limitReached && demandeApprouvee && statusBadge('Demande approuvée', { bg: '#dcfce7', text: '#166534' })}
+                          {limitReached && demandeEnAttente && statusBadge('Demande en attente', { bg: '#fef3c7', text: '#92400e' })}
+                          {limitReached && demandeRefusee && statusBadge('Demande refusée', { bg: '#fee2e2', text: '#991b1b' })}
+                        </div>
+
+                        {demandesForConv.length > 0 && (
+                          <div style={{ fontSize: 13, color: currentTheme.colors.textSecondary, display: 'grid', gap: 6 }}>
+                            {demandesForConv.map(d => (
+                              <div key={d.id} style={{
+                                padding: '8px 10px',
+                                borderRadius: 10,
+                                background: isDark ? 'rgba(0,0,0,0.08)' : '#f8fafc',
+                                border: `1px dashed ${currentTheme.colors.border}`
+                              }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                  <span style={{ fontWeight: 600, color: currentTheme.colors.text }}>
+                                    Demande du {new Date(d.date || d.id).toLocaleDateString('fr-FR')}
+                                  </span>
+                                  <span style={{ fontSize: 12, fontWeight: 700, color: (() => {
+                                    if (d.statut === 'approuvee') return '#166534';
+                                    if (d.statut === 'refusee') return '#b91c1c';
+                                    return '#92400e';
+                                  })() }}>
+                                    {d.statut === 'approuvee' ? 'Approuvée' : d.statut === 'refusee' ? 'Refusée' : 'En attente'}
+                                  </span>
+                                </div>
+                                <div style={{ color: currentTheme.colors.textSecondary, lineHeight: 1.4 }}>
+                                  Raison : {d.raison || '—'}
+                                </div>
+                                {d.utilisee && (
+                                  <div style={{ marginTop: 6, fontSize: 12, color: currentTheme.colors.textTertiary }}>
+                                    (Autorisation déjà utilisée)
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {limitReached && !demandeApprouvee && (
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {demandeEnAttente ? (
+                              <span style={{ fontSize: 13, color: currentTheme.colors.text }}>
+                                Une demande est déjà en attente d'approbation.
+                              </span>
+                            ) : (
+                              <>
+                                <span style={{ fontSize: 13, color: currentTheme.colors.text }}>
+                                  Envoyez une demande d'autorisation pour continuer la modification.
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setEditingConv(conventionForBatiment);
+                                    setShowEditRequestModal(true);
+                                    setEditRequestReason('');
+                                  }}
+                                  style={{
+                                    padding: '10px 14px',
+                                    background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: 10,
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)'
+                                  }}
+                                >
+                                  Demander une autorisation
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
                     <button
