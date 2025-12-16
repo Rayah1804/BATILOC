@@ -9,6 +9,7 @@ import ConfirmModal from './components/ConfirmModal';
 import { useInput } from './hooks/useInput';
 import InputModal from './components/InputModal';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
+import { apiRequest, API_ENDPOINTS } from './config/api';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -47,7 +48,7 @@ export default function AdminDashboard() {
   const [batiments, setBatiments] = useState([]);
   const [utilisateurs, setUtilisateurs] = useState([]);
   const [conventions, setConventions] = useState([]);
-  const [activeSection, setActiveSection] = useState('batiments'); // 'batiments', 'utilisateurs', 'conventions', 'statistiques', 'parametres', 'historique', 'demandes'
+  const [activeSection, setActiveSection] = useState('batiments'); // 'batiments', 'utilisateurs', 'conventions', 'statistiques', 'parametres', 'historique', 'demandes', 'statuts'
   const [demandesSuppression, setDemandesSuppression] = useState([]);
   const [loadingDemandes, setLoadingDemandes] = useState(false);
   const [demandesModification, setDemandesModification] = useState([]);
@@ -126,6 +127,10 @@ export default function AdminDashboard() {
   const [searchConventions, setSearchConventions] = useState('');
   const [selectedConvention, setSelectedConvention] = useState(null);
   const [showConventionModal, setShowConventionModal] = useState(false);
+  
+  // États pour les changements de statut
+  const [statusChanges, setStatusChanges] = useState(null);
+  const [loadingStatusChanges, setLoadingStatusChanges] = useState(false);
   
   // États pour le formulaire de convention
   const [conventionStep, setConventionStep] = useState(1);
@@ -211,6 +216,8 @@ export default function AdminDashboard() {
       loadDemandesModification();
       loadDemandesCreation();
       loadDemandesReset();
+    } else if (activeSection === 'statuts') {
+      loadStatusChanges();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection]);
@@ -506,6 +513,36 @@ export default function AdminDashboard() {
     // Formater le numéro : 480 052/TER/2024
     const numFormatted = String(numConv).padStart(3, '0');
     return `${codeLieu} ${numFormatted}/TER/${year}`;
+  };
+
+  // Fonction pour charger les changements de statut
+  const loadStatusChanges = async () => {
+    setLoadingStatusChanges(true);
+    setMsg('');
+    try {
+      const response = await apiRequest(API_ENDPOINTS.FACTURES_STATUS_CHANGES, {
+        method: 'GET'
+      });
+      
+      if (response.status === 200) {
+        setStatusChanges(response);
+        console.log('✅ Changements de statut chargés:', response.data);
+      } else {
+        setMsg(`Erreur: ${response.message || 'Statut inattendu'}`);
+      }
+    } catch (err) {
+      console.error('Erreur lors du chargement des changements de statut:', err);
+      const errorMessage = err.message || 'Erreur lors du chargement des changements de statut';
+      setMsg(errorMessage);
+      if (errorMessage.includes('403') || errorMessage.includes('Accès refusé')) {
+        setMsg('Accès refusé. Vérifiez vos permissions.');
+      } else if (errorMessage.includes('401') || errorMessage.includes('Token')) {
+        setMsg('Session expirée. Veuillez vous reconnecter.');
+        setTimeout(() => navigate('/auth'), 2000);
+      }
+    } finally {
+      setLoadingStatusChanges(false);
+    }
   };
 
   const loadConventions = async (q = '') => {
@@ -2400,6 +2437,7 @@ export default function AdminDashboard() {
               { icon: 'fa-building', label: 'Bâtiments', section: 'batiments', active: activeSection === 'batiments' },
               { icon: 'fa-users', label: 'Utilisateurs', section: 'utilisateurs', active: activeSection === 'utilisateurs' },
               { icon: 'fa-file-contract', label: 'Conventions', section: 'conventions', active: activeSection === 'conventions' },
+              { icon: 'fa-sync-alt', label: 'Changements de statut', section: 'statuts', active: activeSection === 'statuts', badge: statusChanges?.data?.needsUpdate || 0 },
               { icon: 'fa-chart-line', label: 'Vue', section: 'dashboard', active: activeSection === 'dashboard' },
               { icon: 'fa-history', label: 'Historique', section: 'historique', active: activeSection === 'historique' },
               { icon: 'fa-exclamation-triangle', label: 'Demandes', section: 'demandes', active: activeSection === 'demandes', badge: demandesModification.filter(d => d.statut === 'en_attente').length + demandesCreation.filter(d => d.statut === 'en_attente').length + demandesReset.filter(d => d.statut === 'en_attente').length },
@@ -2411,10 +2449,13 @@ export default function AdminDashboard() {
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
-                    if (item.section === 'batiments' || item.section === 'utilisateurs' || item.section === 'conventions' || item.section === 'dashboard' || item.section === 'historique' || item.section === 'demandes' || item.section === 'parametres') {
+                    if (item.section === 'batiments' || item.section === 'utilisateurs' || item.section === 'conventions' || item.section === 'statuts' || item.section === 'dashboard' || item.section === 'historique' || item.section === 'demandes' || item.section === 'parametres') {
                       setActiveSection(item.section);
                       setMsg('');
                       setShowUserForm(false);
+                      if (item.section === 'statuts') {
+                        loadStatusChanges();
+                      }
                     } else if (item.section === 'logout') {
                       setShowLogoutModal(true);
                     }
@@ -5809,6 +5850,282 @@ export default function AdminDashboard() {
           )}
 
           {/* Section Demandes de Modification */}
+          {activeSection === 'statuts' && (
+            <div>
+              {/* Header */}
+              <div style={{ marginBottom: '32px' }}>
+                <h1 style={{ 
+                  margin: '0 0 8px', 
+                  fontSize: '28px', 
+                  fontWeight: 700, 
+                  color: currentTheme.colors.text,
+                  lineHeight: 1.2
+                }}>
+                  Changements de Statut
+                </h1>
+                <p style={{ 
+                  margin: 0, 
+                  fontSize: '14px', 
+                  color: currentTheme.colors.textTertiary,
+                  fontWeight: 400
+                }}>
+                  Visualisation des changements de statut basés sur la date Madagascar (UTC+3)
+                </p>
+              </div>
+
+              {/* Boutons d'action - Lecture seule pour Admin */}
+              <div style={{ 
+                display: 'flex', 
+                gap: '12px', 
+                marginBottom: '24px',
+                flexWrap: 'wrap'
+              }}>
+                <button
+                  onClick={loadStatusChanges}
+                  disabled={loadingStatusChanges}
+                  style={{
+                    backgroundColor: currentTheme.colors.cardBackground,
+                    color: currentTheme.colors.text,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '8px',
+                    padding: '12px 24px',
+                    cursor: loadingStatusChanges ? 'not-allowed' : 'pointer',
+                    fontWeight: '600',
+                    fontSize: '14px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <i className={`fas ${loadingStatusChanges ? 'fa-spinner fa-spin' : 'fa-refresh'}`}></i>
+                  Actualiser
+                </button>
+                <div style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  backgroundColor: currentTheme.colors.backgroundTertiary,
+                  color: currentTheme.colors.textTertiary,
+                  fontSize: '14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  border: `1px solid ${currentTheme.colors.border}`
+                }}>
+                  <i className="fas fa-info-circle"></i>
+                  Mode lecture seule - Seul le Rédacteur peut mettre à jour les statuts
+                </div>
+              </div>
+
+              {/* Message d'erreur */}
+              {msg && (
+                <div style={{
+                  marginBottom: '24px',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: msg.includes('✅') ? '#dcfce7' : msg.includes('ℹ️') ? '#dbeafe' : '#fee2e2',
+                  color: msg.includes('✅') ? '#166534' : msg.includes('ℹ️') ? '#1e40af' : '#991b1b',
+                  border: `1px solid ${msg.includes('✅') ? '#10b981' : msg.includes('ℹ️') ? '#3b82f6' : '#ef4444'}`,
+                  fontSize: '14px',
+                  fontWeight: 500
+                }}>
+                  {msg}
+                </div>
+              )}
+
+              {/* Résumé */}
+              {statusChanges?.data && (
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '16px',
+                  marginBottom: '24px'
+                }}>
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '12px',
+                    padding: '20px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#007bff', marginBottom: '8px' }}>
+                      {statusChanges.data.currentMonth}
+                    </div>
+                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Mois actuel (Madagascar)
+                    </div>
+                  </div>
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '12px',
+                    padding: '20px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#ef4444', marginBottom: '8px' }}>
+                      {statusChanges.data.needsUpdate}
+                    </div>
+                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      À mettre à jour
+                    </div>
+                  </div>
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '12px',
+                    padding: '20px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>
+                      {statusChanges.data.allGood}
+                    </div>
+                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Statuts corrects
+                    </div>
+                  </div>
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '12px',
+                    padding: '20px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, marginBottom: '8px' }}>
+                      {statusChanges.data.total}
+                    </div>
+                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Total conventions
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Liste des changements */}
+              {loadingStatusChanges ? (
+                <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                  <i className="fas fa-spinner fa-spin" style={{ fontSize: '32px', marginBottom: '16px', color: currentTheme.colors.primary }}></i>
+                  <div style={{ fontSize: '14px', fontWeight: 500 }}>Chargement des changements de statut...</div>
+                </div>
+              ) : statusChanges?.data ? (
+                <div>
+                  {/* Conventions à mettre à jour */}
+                  {statusChanges.data.changes.filter(c => c.needsUpdate).length > 0 ? (
+                    <div style={{ marginBottom: '32px' }}>
+                      <h2 style={{ 
+                        fontSize: '20px', 
+                        fontWeight: 600, 
+                        color: currentTheme.colors.text,
+                        marginBottom: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <i className="fas fa-exclamation-triangle" style={{ color: '#ef4444' }}></i>
+                        Conventions nécessitant une mise à jour ({statusChanges.data.changes.filter(c => c.needsUpdate).length})
+                      </h2>
+                      <div style={{
+                        display: 'grid',
+                        gap: '12px'
+                      }}>
+                        {statusChanges.data.changes.filter(c => c.needsUpdate).map((change) => (
+                          <div
+                            key={change.numConv}
+                            style={{
+                              background: currentTheme.colors.cardBackground,
+                              border: `1px solid ${change.expectedStatus === 'Confirmé' ? '#10b981' : '#f59e0b'}`,
+                              borderRadius: '12px',
+                              padding: '20px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                                <span style={{ 
+                                  fontWeight: 700, 
+                                  fontSize: '16px', 
+                                  color: currentTheme.colors.text 
+                                }}>
+                                  Convention #{change.numConv}
+                                </span>
+                                <span style={{
+                                  padding: '4px 12px',
+                                  borderRadius: '12px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  background: change.currentStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                  color: change.currentStatus === 'Confirmé' ? '#166534' : '#92400e'
+                                }}>
+                                  {change.currentStatus}
+                                </span>
+                                <i className="fas fa-arrow-right" style={{ color: currentTheme.colors.textTertiary }}></i>
+                                <span style={{
+                                  padding: '4px 12px',
+                                  borderRadius: '12px',
+                                  fontSize: '12px',
+                                  fontWeight: 600,
+                                  background: change.expectedStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                  color: change.expectedStatus === 'Confirmé' ? '#166534' : '#92400e'
+                                }}>
+                                  {change.expectedStatus}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                <strong>Client:</strong> {change.locataire?.nomcli || 'N/A'}
+                              </div>
+                              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                <strong>Bâtiment:</strong> {change.batiment?.adresse || 'N/A'}
+                              </div>
+                              {change.lastPaymentMonth && (
+                                <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                  <strong>Dernier paiement:</strong> {change.lastPaymentMonth}
+                                </div>
+                              )}
+                              <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, fontStyle: 'italic', marginTop: '8px' }}>
+                                {change.reason}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      background: currentTheme.colors.cardBackground,
+                      border: `1px solid #10b981`,
+                      borderRadius: '12px',
+                      padding: '24px',
+                      marginBottom: '32px',
+                      textAlign: 'center'
+                    }}>
+                      <i className="fas fa-check-circle" style={{ fontSize: '32px', color: '#10b981', marginBottom: '12px' }}></i>
+                      <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                        ✅ Tous les statuts sont à jour !
+                      </p>
+                      <p style={{ margin: '8px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                        Aucune convention ne nécessite de mise à jour. Tous les statuts correspondent aux paiements actuels.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  background: currentTheme.colors.cardBackground,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '12px',
+                  padding: '24px',
+                  textAlign: 'center'
+                }}>
+                  <i className="fas fa-info-circle" style={{ fontSize: '32px', color: currentTheme.colors.textTertiary, marginBottom: '12px' }}></i>
+                  <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                    Cliquez sur "Actualiser" pour charger les changements de statut
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeSection === 'demandes' && (
             <div>
               {/* En-tête avec statistiques - Demandes de Modification uniquement */}

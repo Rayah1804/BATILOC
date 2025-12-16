@@ -61,6 +61,8 @@ export const API_ENDPOINTS = {
   FACTURES: '/factures',
   FACTURE: (id) => `/factures/${id}`,
   FACTURES_STATS: '/factures/stats/summary',
+  FACTURES_CHECK_STATUSES: '/factures/check-statuses',
+  FACTURES_STATUS_CHANGES: '/factures/status-changes',
 };
 
 export default API_BASE_URL;

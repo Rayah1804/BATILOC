@@ -2,18 +2,13 @@ const express = require("express");
 const router = express.Router();
 const sequelize = require("../connection/db");
 const { DataTypes, Op } = require("sequelize");
+const madagascarDate = require("../utils/madagascarDate");
 
 // Models
 const Convention = require("../models/convention")(sequelize, DataTypes);
 const Mbatiment = require("../models/mbatiment")(sequelize, DataTypes);
 const Locataire = require("../models/locataire")(sequelize, DataTypes);
 const Facture = require("../models/facture")(sequelize, DataTypes);
-
-// Helper: current year as a DateOnly (YYYY-01-01)
-function getCurrentYearDateOnly() {
-  const y = new Date().getFullYear();
-  return `${y}-01-01`;
-}
 
 // GET list with optional search, pagination and filters
 router.get("/", async (req, res) => {
@@ -122,25 +117,45 @@ router.get("/", async (req, res) => {
     const batimentsById = new Map();
     const locatairesById = new Map();
 
-    // Recalculer le statut des conventions en fonction des factures payées (source de vérité)
-    const numConvs = rows.map(r => r.numConv);
-    if (numConvs.length > 0) {
-      const facturesPayees = await Facture.findAll({
-        attributes: ['numConv', [sequelize.fn('COUNT', sequelize.col('numFact')), 'paidCount']],
-        where: { numConv: { [Op.in]: numConvs }, statutPaiement: true },
-        group: ['numConv']
-      });
-      const paidMap = new Map(facturesPayees.map(f => [f.numConv, Number(f.get('paidCount')) || 0]));
-
-      // Mettre à jour en base si le statut calculé diffère
-      await Promise.all(rows.map(async (conv) => {
-        const shouldBeConfirmed = (paidMap.get(conv.numConv) || 0) > 0;
-        if (conv.statutConv !== shouldBeConfirmed) {
-          await conv.update({ statutConv: shouldBeConfirmed });
-          conv.statutConv = shouldBeConfirmed;
-        }
-      }));
-    }
+    // NOTE: Le recalcul automatique des statuts a été désactivé pour permettre la démonstration
+    // Les statuts sont maintenant mis à jour uniquement via :
+    // 1. Le bouton "Mettre à jour les statuts" dans le menu "Changements de statut"
+    // 2. La fonction automatique checkAndUpdateConventionStatuses() (au démarrage et toutes les heures)
+    // 
+    // Cela permet de garder les statuts "Confirmé" (incorrect) créés pour la démonstration
+    // jusqu'à ce que l'utilisateur clique explicitement sur "Mettre à jour les statuts"
+    
+    // Ancien code de recalcul automatique (désactivé) :
+    // const numConvs = rows.map(r => r.numConv);
+    // if (numConvs.length > 0) {
+    //   const madagascarDate = require("../utils/madagascarDate");
+    //   const currentYear = madagascarDate.getMadagascarYear();
+    //   const currentMonth = madagascarDate.getMadagascarMonth();
+    //   
+    //   await Promise.all(rows.map(async (conv) => {
+    //     const lastPaidFacture = await Facture.findOne({
+    //       where: {
+    //         numConv: conv.numConv,
+    //         statutPaiement: true
+    //       },
+    //       order: [['mois', 'DESC']]
+    //     });
+    //     
+    //     let shouldBeConfirmed = false;
+    //     
+    //     if (lastPaidFacture) {
+    //       const factureMois = new Date(lastPaidFacture.mois);
+    //       const factureYear = factureMois.getFullYear();
+    //       const factureMonth = factureMois.getMonth() + 1;
+    //       shouldBeConfirmed = (factureYear === currentYear && factureMonth === currentMonth);
+    //     }
+    //     
+    //     if (conv.statutConv !== shouldBeConfirmed) {
+    //       await conv.update({ statutConv: shouldBeConfirmed });
+    //       conv.statutConv = shouldBeConfirmed;
+    //     }
+    //   }));
+    // }
 
     // prefetch related entities
     const numBats = [...new Set(rows.map(r => r.numBat))];
@@ -264,7 +279,7 @@ router.post("/", require("../middleware/validator").validateConvention, async (r
       // step 2 - locataire
       nomcli, datenais, lieunais, pere, mere, cin, delivcin, adressecli, activite,
       // optional
-      statutConv
+      statutConv, contact
     } = req.body;
 
     if (!numBat || !adresse || montant === undefined || montant === null) {
@@ -308,9 +323,10 @@ router.post("/", require("../middleware/validator").validateConvention, async (r
     }
 
     // IMPORTANT: forcer numFact:null pour éviter une contrainte FK si la colonne a un défaut non nul en DB
+    // Utiliser la date Madagascar (UTC+3) pour la date de convention
     const created = await Convention.create({
       lieu: bat.adresse.substring(0, 10),
-      dateConv: getCurrentYearDateOnly(),
+      dateConv: madagascarDate.getMadagascarCurrentYearDateOnly(),
       statutConv: !!statutConv,
       numBat: bat.numBat,
       codeCli: loc.codeCli,

@@ -3,6 +3,7 @@ const router = express.Router();
 const sequelize = require("../connection/db");
 const { DataTypes, Op } = require("sequelize");
 const { requireRole } = require("../middleware/auth");
+const madagascarDate = require("../utils/madagascarDate");
 
 // Models
 const Facture = require("../models/facture")(sequelize, DataTypes);
@@ -126,7 +127,196 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET - Détails d'une facture
+// IMPORTANT: Les routes spécifiques doivent être définies AVANT les routes avec paramètres
+// GET - Obtenir les changements de statut récents avec détails
+router.get("/status-changes", requireRole('opérateur de saisie', 'redacteur', 'caissier', 'administrateur'), async (req, res) => {
+  try {
+    const madagascarDate = require("../utils/madagascarDate");
+    const currentYear = madagascarDate.getMadagascarYear();
+    const currentMonth = madagascarDate.getMadagascarMonth();
+    const currentMonthYear = madagascarDate.getMadagascarMonthYear();
+    
+    // Récupérer toutes les conventions
+    const conventions = await Convention.findAll({
+      order: [['numConv', 'ASC']]
+    });
+    
+    const changes = [];
+    
+    for (const convention of conventions) {
+      // Récupérer la dernière facture payée
+      const lastPaidFacture = await Facture.findOne({
+        where: {
+          numConv: convention.numConv,
+          statutPaiement: true
+        },
+        order: [['mois', 'DESC']]
+      });
+      
+      let statusInfo = {
+        numConv: convention.numConv,
+        currentStatus: convention.statutConv ? 'Confirmé' : 'En attente',
+        expectedStatus: null,
+        lastPaymentMonth: null,
+        currentMonth: currentMonthYear,
+        needsUpdate: false,
+        reason: ''
+      };
+      
+      if (!lastPaidFacture) {
+        statusInfo.expectedStatus = 'En attente';
+        statusInfo.needsUpdate = convention.statutConv === true;
+        statusInfo.reason = 'Aucun paiement trouvé';
+      } else {
+        const factureMois = new Date(lastPaidFacture.mois);
+        const factureYear = factureMois.getFullYear();
+        const factureMonth = factureMois.getMonth() + 1;
+        const factureMonthYear = `${factureYear}-${String(factureMonth).padStart(2, '0')}`;
+        
+        statusInfo.lastPaymentMonth = factureMonthYear;
+        
+        // Comparer avec le mois/année actuel (gère le changement d'année)
+        // Exemple: Décembre 2024 vs Janvier 2025 → En attente (année différente)
+        const isCurrentMonthPaid = (factureYear === currentYear && factureMonth === currentMonth);
+        
+        if (isCurrentMonthPaid) {
+          statusInfo.expectedStatus = 'Confirmé';
+          statusInfo.needsUpdate = convention.statutConv === false;
+          statusInfo.reason = `Paiement du mois actuel (${currentMonthYear}) trouvé`;
+        } else {
+          statusInfo.expectedStatus = 'En attente';
+          statusInfo.needsUpdate = convention.statutConv === true;
+          statusInfo.reason = `Dernier paiement: ${factureMonthYear} ≠ mois actuel (${currentMonthYear})`;
+        }
+      }
+      
+      // Récupérer les informations du locataire et du bâtiment
+      const [locataire, batiment] = await Promise.all([
+        Locataire.findByPk(convention.codeCli),
+        Mbatiment.findByPk(convention.numBat)
+      ]);
+      
+      statusInfo.locataire = locataire ? {
+        nomcli: locataire.nomcli,
+        codeCli: locataire.codeCli
+      } : null;
+      
+      statusInfo.batiment = batiment ? {
+        adresse: batiment.adresse,
+        numBat: batiment.numBat
+      } : null;
+      
+      changes.push(statusInfo);
+    }
+    
+    // Filtrer pour ne montrer que ceux qui ont besoin d'être mis à jour
+    const needsUpdate = changes.filter(c => c.needsUpdate);
+    const allGood = changes.filter(c => !c.needsUpdate);
+    
+    console.log(`📊 Statuts récupérés: ${changes.length} total, ${needsUpdate.length} à mettre à jour, ${allGood.length} OK`);
+    
+    res.status(200).json({
+      status: 200,
+      message: "Changements de statut récupérés",
+      data: {
+        currentMonth: currentMonthYear,
+        total: changes.length,
+        needsUpdate: needsUpdate.length,
+        allGood: allGood.length,
+        changes: changes,
+        summary: {
+          toConfirm: needsUpdate.filter(c => c.expectedStatus === 'Confirmé').length,
+          toPending: needsUpdate.filter(c => c.expectedStatus === 'En attente').length
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Erreur lors de la récupération des changements de statut:", err);
+    res.status(500).json({
+      status: 500,
+      message: "Erreur serveur",
+      error: err.message
+    });
+  }
+});
+
+// GET - Route pour déclencher manuellement la vérification des statuts
+router.get("/check-statuses", requireRole('opérateur de saisie', 'redacteur', 'caissier', 'administrateur'), async (req, res) => {
+  try {
+    const result = await checkAndUpdateConventionStatuses();
+    res.status(200).json({
+      status: 200,
+      message: "Vérification des statuts terminée",
+      data: result
+    });
+  } catch (err) {
+    console.error("Erreur lors de la vérification des statuts:", err);
+    res.status(500).json({
+      status: 500,
+      message: "Erreur serveur",
+      error: err.message
+    });
+  }
+});
+
+// GET - Statistiques des factures (doit être avant /:numFact)
+router.get("/stats/summary", requireRole('caissier', 'administrateur'), async (req, res) => {
+  try {
+    const { mois, annee } = req.query;
+    const where = {};
+    
+    if (mois && annee) {
+      where.mois = `${annee}-${mois.padStart(2, '0')}-01`;
+    }
+
+    const totalFactures = await Facture.count({ where });
+    const facturesPayees = await Facture.count({ 
+      where: { 
+        ...where, 
+        statutPaiement: true 
+      } 
+    });
+
+    // Calculer le montant total des factures
+    const factures = await Facture.findAll({ 
+      where,
+      attributes: ['numBat']
+    });
+
+    const numBats = [...new Set(factures.map(f => f.numBat).filter(Boolean))];
+    
+    const batiments = numBats.length > 0 
+      ? await Mbatiment.findAll({
+          where: { numBat: { [Op.in]: numBats } },
+          attributes: ['numBat', 'montant']
+        })
+      : [];
+
+    const montantsMap = new Map(batiments.map(b => [b.numBat, b.montant || 0]));
+    const montantTotal = factures.reduce((sum, f) => {
+      return sum + (montantsMap.get(f.numBat) || 0);
+    }, 0);
+
+    res.status(200).json({
+      status: 200,
+      data: {
+        totalFactures,
+        facturesPayees,
+        facturesEnAttente: totalFactures - facturesPayees,
+        montantTotal
+      }
+    });
+  } catch (err) {
+    console.error("Erreur GET stats:", err);
+    res.status(500).json({
+      status: 500,
+      message: "Erreur serveur",
+      error: err.message
+    });
+  }
+});
+
+// GET - Détails d'une facture (route avec paramètre - doit être en dernier)
 router.get("/:numFact", async (req, res) => {
   try {
     const { numFact } = req.params;
@@ -244,7 +434,7 @@ router.post("/", requireRole('caissier', 'administrateur'), async (req, res) => 
       {
         replacements: {
           dm,
-          exercice: new Date(),
+          exercice: madagascarDate.getMadagascarDate(),
           mois: moisFormatted,
           codegare: 1,
           depart: departValue,
@@ -433,61 +623,124 @@ router.delete("/:numFact", requireRole('caissier', 'administrateur'), async (req
   }
 });
 
-// GET - Statistiques des factures
-router.get("/stats/summary", requireRole('caissier', 'administrateur'), async (req, res) => {
+// Fonction pour vérifier et mettre à jour automatiquement les statuts des conventions
+// en fonction du dernier paiement mensuel
+// Utilise la date Madagascar (UTC+3) pour toutes les comparaisons
+async function checkAndUpdateConventionStatuses() {
+  const transaction = await sequelize.transaction();
+  
   try {
-    const { mois, annee } = req.query;
-    const where = {};
+    console.log('🔄 Début de la vérification automatique des statuts des conventions...');
     
-    if (mois && annee) {
-      where.mois = `${annee}-${mois.padStart(2, '0')}-01`;
-    }
-
-    const totalFactures = await Facture.count({ where });
-    const facturesPayees = await Facture.count({ 
-      where: { 
-        ...where, 
-        statutPaiement: true 
-      } 
-    });
-
-    // Calculer le montant total des factures
-    const factures = await Facture.findAll({ 
-      where,
-      attributes: ['numBat']
-    });
-
-    const numBats = [...new Set(factures.map(f => f.numBat).filter(Boolean))];
+    // Obtenir la date actuelle en heure Madagascar (UTC+3)
+    const currentYear = madagascarDate.getMadagascarYear();
+    const currentMonth = madagascarDate.getMadagascarMonth();
+    const currentMonthYear = madagascarDate.getMadagascarMonthYear();
     
-    const batiments = numBats.length > 0 
-      ? await Mbatiment.findAll({
-          where: { numBat: { [Op.in]: numBats } },
-          attributes: ['numBat', 'montant']
-        })
-      : [];
-
-    const montantsMap = new Map(batiments.map(b => [b.numBat, b.montant || 0]));
-    const montantTotal = factures.reduce((sum, f) => {
-      return sum + (montantsMap.get(f.numBat) || 0);
-    }, 0);
-
-    res.status(200).json({
-      status: 200,
-      data: {
-        totalFactures,
-        facturesPayees,
-        facturesEnAttente: totalFactures - facturesPayees,
-        montantTotal
+    console.log(`📅 Mois/année actuel (Madagascar UTC+3): ${currentMonthYear}`);
+    
+    // Récupérer toutes les conventions avec un verrou pour éviter les conflits
+    const conventions = await Convention.findAll({
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+    console.log(`📋 Nombre de conventions à vérifier: ${conventions.length}`);
+    
+    let updatedCount = 0;
+    let checkedCount = 0;
+    const updatedConventions = [];
+    
+    // Pour chaque convention, vérifier le dernier paiement
+    for (const convention of conventions) {
+      checkedCount++;
+      
+      // Recharger la convention pour avoir les dernières données
+      await convention.reload({ transaction });
+      
+      // Trouver la dernière facture payée pour cette convention
+      const lastPaidFacture = await Facture.findOne({
+        where: {
+          numConv: convention.numConv,
+          statutPaiement: true
+        },
+        order: [['mois', 'DESC']],
+        transaction
+      });
+      
+      // Si aucune facture payée n'existe, mettre le statut à "en attente"
+      if (!lastPaidFacture) {
+        if (convention.statutConv === true) {
+          await convention.update({ statutConv: false }, { transaction });
+          console.log(
+            `  ⚠️ Convention ${convention.numConv}: Aucun paiement trouvé → Statut mis à "En attente"`
+          );
+          updatedCount++;
+          updatedConventions.push(convention.numConv);
+        }
+        continue;
       }
-    });
+      
+      // Extraire le mois/année de la dernière facture payée
+      const factureMois = new Date(lastPaidFacture.mois);
+      const factureYear = factureMois.getFullYear();
+      const factureMonth = factureMois.getMonth() + 1;
+      
+      // Comparer avec le mois/année actuel en heure Madagascar (comparaison mois/année uniquement)
+      // Gère correctement le changement d'année :
+      // - Exemple 1: Décembre 2024 vs Janvier 2025 → En attente (année différente)
+      // - Exemple 2: Novembre 2024 vs Décembre 2024 → En attente (mois différent, même année)
+      // - Exemple 3: Décembre 2024 vs Décembre 2024 → Confirmé (même mois/année)
+      const isCurrentMonthPaid = (factureYear === currentYear && factureMonth === currentMonth);
+      
+      // Si le paiement du mois courant n'existe pas, mettre le statut à "en attente"
+      if (!isCurrentMonthPaid) {
+        if (convention.statutConv === true) {
+          await convention.update({ statutConv: false }, { transaction });
+          console.log(
+            `  ⚠️ Convention ${convention.numConv}: Dernier paiement ${factureYear}-${String(factureMonth).padStart(2, '0')} ` +
+            `≠ mois actuel (${currentMonthYear}) → Statut mis à "En attente"`
+          );
+          updatedCount++;
+          updatedConventions.push(convention.numConv);
+        }
+      } else {
+        // Si le paiement du mois courant existe, s'assurer que le statut est "Confirmé"
+        if (convention.statutConv === false) {
+          await convention.update({ statutConv: true }, { transaction });
+          console.log(
+            `  ✅ Convention ${convention.numConv}: Paiement du mois actuel (${currentMonthYear}) trouvé → Statut mis à "Confirmé"`
+          );
+          updatedCount++;
+          updatedConventions.push(convention.numConv);
+        }
+      }
+    }
+    
+    // Commit de la transaction pour sauvegarder tous les changements
+    await transaction.commit();
+    console.log(`💾 Transaction commitée: ${updatedCount} statut(s) sauvegardé(s) en base de données`);
+    
+    console.log(
+      `✅ Vérification terminée: ${checkedCount} conventions vérifiées, ${updatedCount} statuts mis à jour`
+    );
+    
+    return {
+      success: true,
+      checked: checkedCount,
+      updated: updatedCount,
+      currentMonth: currentMonthYear,
+      message: updatedCount > 0 
+        ? `${updatedCount} statut(s) mis à jour avec succès`
+        : `Tous les statuts sont déjà à jour (${checkedCount} convention(s) vérifiée(s))`
+    };
   } catch (err) {
-    console.error("Erreur GET stats:", err);
-    res.status(500).json({
-      status: 500,
-      message: "Erreur serveur",
-      error: err.message
-    });
+    console.error('❌ Erreur lors de la vérification automatique des statuts:', err);
+    throw err;
   }
-});
+}
+
+// Les routes /status-changes et /check-statuses sont déjà définies plus haut (avant /:numFact)
+// Pas besoin de les redéfinir ici
 
 module.exports = router;
+module.exports.checkAndUpdateConventionStatuses = checkAndUpdateConventionStatuses;

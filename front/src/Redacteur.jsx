@@ -23,7 +23,7 @@ export default function RedacteurHome() {
   const { theme, isDark } = useTheme();
   const currentTheme = isDark ? darkTheme : lightTheme;
   const { confirm, close, confirmState } = useConfirm();
-  const [activeSection, setActiveSection] = useState('conventions'); // 'batiments' | 'conventions'
+  const [activeSection, setActiveSection] = useState('conventions'); // 'batiments' | 'conventions' | 'statuts'
   const [batiments, setBatiments] = useState([]);
   const [conventions, setConventions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -47,6 +47,10 @@ export default function RedacteurHome() {
   const [batimentForDetail, setBatimentForDetail] = useState(null);
   const [loadingBatimentDetails, setLoadingBatimentDetails] = useState(false);
   const [showFullscreenMap, setShowFullscreenMap] = useState(false);
+  
+  // État pour les changements de statut
+  const [statusChanges, setStatusChanges] = useState(null);
+  const [loadingStatusChanges, setLoadingStatusChanges] = useState(false);
   
   // État pour les paramètres
   const [user, setUser] = useState(() => {
@@ -87,16 +91,6 @@ export default function RedacteurHome() {
     const minAbsolute = new Date(2000, 0, 1); // 1er janvier 2000
     return minAbsolute.toISOString().split('T')[0];
   }, []);
-
-  // Date minimale logique pour validation (date de naissance + 18 ans)
-  const minDateDelivranceLogic = useMemo(() => {
-    if (!step2.datenais) {
-      return null;
-    }
-    const dateNaissance = new Date(step2.datenais);
-    const dateMinCIN = new Date(dateNaissance.getFullYear() + 18, dateNaissance.getMonth(), dateNaissance.getDate());
-    return dateMinCIN.toISOString().split('T')[0];
-  }, [step2.datenais]);
 
   const maxDateDelivrance = useMemo(() => {
     // Toujours limiter à aujourd'hui (pas de dates futures)
@@ -280,11 +274,121 @@ export default function RedacteurHome() {
     localStorage.setItem('modificationsJournalieres', JSON.stringify(modifications));
   };
 
+  // Fonction pour charger les changements de statut
+  const loadStatusChanges = async () => {
+    setLoadingStatusChanges(true);
+    setMsg(''); // Réinitialiser le message d'erreur
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        navigate('/auth');
+        return;
+      }
+      
+      const response = await apiRequest(API_ENDPOINTS.FACTURES_STATUS_CHANGES, {
+        method: 'GET'
+      });
+      
+      if (response.status === 200) {
+        setStatusChanges(response);
+        console.log('✅ Changements de statut chargés:', response.data);
+      } else {
+        setMsg(`Erreur: ${response.message || 'Statut inattendu'}`);
+      }
+    } catch (err) {
+      console.error('Erreur lors du chargement des changements de statut:', err);
+      const errorMessage = err.message || 'Erreur lors du chargement des changements de statut';
+      setMsg(errorMessage);
+      // Afficher aussi dans la console pour déboguer
+      if (errorMessage.includes('403') || errorMessage.includes('Accès refusé')) {
+        setMsg('Accès refusé. Vérifiez vos permissions.');
+      } else if (errorMessage.includes('401') || errorMessage.includes('Token')) {
+        setMsg('Session expirée. Veuillez vous reconnecter.');
+        setTimeout(() => navigate('/auth'), 2000);
+      } else {
+        setMsg(`Erreur: ${errorMessage}`);
+      }
+    } finally {
+      setLoadingStatusChanges(false);
+    }
+  };
+
+  // Fonction pour mettre à jour les statuts
+  const updateStatuses = async () => {
+    try {
+      setLoadingStatusChanges(true);
+      setMsg(''); // Réinitialiser le message
+      
+      console.log('🔄 Mise à jour des statuts en cours...');
+      const response = await apiRequest(API_ENDPOINTS.FACTURES_CHECK_STATUSES, {
+        method: 'GET'
+      });
+      
+      if (response.status === 200) {
+        const updatedCount = response.data?.updated || 0;
+        const checkedCount = response.data?.checked || 0;
+        const updatedConventions = response.data?.updatedConventions || [];
+        
+        console.log(`✅ Mise à jour terminée: ${updatedCount} statut(s) mis à jour sur ${checkedCount} vérifié(s)`);
+        if (updatedConventions.length > 0) {
+          console.log(`📝 Conventions mises à jour: ${updatedConventions.join(', ')}`);
+        }
+        
+        if (updatedCount > 0) {
+          setMsg(`✅ ${updatedCount} statut(s) mis à jour avec succès ! (Conventions: ${updatedConventions.join(', ')})`);
+          
+          // Afficher un message détaillé dans la console
+          console.log('📊 DÉTAILS DES CHANGEMENTS:');
+          console.log(`   • ${updatedCount} convention(s) modifiée(s)`);
+          console.log(`   • Conventions: ${updatedConventions.join(', ')}`);
+          console.log(`   • Changement: Confirmé → En attente`);
+        } else {
+          setMsg(`ℹ️ Tous les statuts sont déjà à jour (${checkedCount} convention(s) vérifiée(s))`);
+        }
+        
+        // Attendre un court délai pour que l'utilisateur voie le message
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Recharger les changements et les conventions pour mettre à jour l'affichage
+        console.log('🔄 Rechargement des données pour voir les changements...');
+        // Forcer le rechargement en vidant d'abord le cache
+        setStatusChanges(null);
+        
+        // Recharger d'abord les conventions pour voir les changements de statut IMMÉDIATEMENT
+        console.log('🔄 Rechargement des conventions pour voir les changements...');
+        await loadConventions();
+        console.log('✅ Conventions rechargées - Les statuts ont changé de "Confirmé" à "En attente"');
+        
+        // Attendre un peu pour que l'utilisateur voie les changements dans la liste des conventions
+        await new Promise(resolve => setTimeout(resolve, 800));
+        
+        // Puis recharger les changements de statut pour voir que la liste est vide
+        console.log('🔄 Rechargement des changements de statut...');
+        await loadStatusChanges();
+        
+        // Après le rechargement, la liste des conventions à mettre à jour devrait être vide
+        console.log('✅ Données rechargées, les changements sont maintenant visibles:');
+        console.log('   • Dans "Conventions": Les statuts sont maintenant "En attente"');
+        console.log('   • Dans "Changements de statut": La liste est vide (tous les statuts sont à jour)');
+      } else {
+        setMsg(`Erreur: ${response.message || 'Statut inattendu'}`);
+      }
+    } catch (err) {
+      console.error('❌ Erreur lors de la mise à jour des statuts:', err);
+      const errorMessage = err.message || 'Erreur lors de la mise à jour des statuts';
+      setMsg(`Erreur: ${errorMessage}`);
+    } finally {
+      setLoadingStatusChanges(false);
+    }
+  };
+
   useEffect(() => {
     if (activeSection === 'batiments') {
       loadBatiments();
     } else if (activeSection === 'conventions') {
       loadConventions();
+    } else if (activeSection === 'statuts') {
+      loadStatusChanges();
     }
     // Charger les demandes de modification
     const demandes = JSON.parse(localStorage.getItem('demandesModification') || '[]');
@@ -1522,6 +1626,7 @@ export default function RedacteurHome() {
             {[
               { icon: 'fa-building', label: 'Bâtiments', section: 'batiments', active: activeSection === 'batiments' },
               { icon: 'fa-file-contract', label: 'Conventions', section: 'conventions', active: activeSection === 'conventions' },
+              { icon: 'fa-sync-alt', label: 'Changements de statut', section: 'statuts', active: activeSection === 'statuts', badge: statusChanges?.data?.needsUpdate || 0 },
               { icon: 'fa-cog', label: 'Paramètres', section: 'parametres', active: activeSection === 'parametres' },
               { icon: 'fa-sign-out-alt', label: 'Déconnexion', section: 'logout', active: false },
             ].map((item, i) => (
@@ -1530,9 +1635,12 @@ export default function RedacteurHome() {
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
-                    if (item.section === 'batiments' || item.section === 'conventions' || item.section === 'parametres') {
+                    if (item.section === 'batiments' || item.section === 'conventions' || item.section === 'statuts' || item.section === 'parametres') {
                       setActiveSection(item.section);
                       setMsg('');
+                      if (item.section === 'statuts') {
+                        loadStatusChanges();
+                      }
                     } else if (item.section === 'logout') {
                       setShowLogoutModal(true);
                     }
@@ -1553,7 +1661,21 @@ export default function RedacteurHome() {
                   }}
                 >
                   <i className={`fas ${item.icon}`} style={{ fontSize: 18, lineHeight: 1, display: 'flex', alignItems: 'center' }}></i>
-                  <span style={{ lineHeight: 1 }}>{item.label}</span>
+                  <span style={{ lineHeight: 1, flex: 1 }}>{item.label}</span>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span style={{
+                      background: '#ef4444',
+                      color: 'white',
+                      borderRadius: '12px',
+                      padding: '2px 8px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      minWidth: '20px',
+                      textAlign: 'center'
+                    }}>
+                      {item.badge}
+                    </span>
+                  )}
                 </a>
               </li>
             ))}
@@ -1780,6 +1902,367 @@ export default function RedacteurHome() {
           </div>
         )}
         
+        {activeSection === 'statuts' && (
+          <div>
+            {/* Header */}
+            <div style={{ marginBottom: '32px' }}>
+              <h1 style={{ 
+                margin: '0 0 8px', 
+                fontSize: '28px', 
+                fontWeight: 700, 
+                color: currentTheme.colors.text,
+                lineHeight: 1.2
+              }}>
+                Changements de Statut
+              </h1>
+              <p style={{ 
+                margin: 0, 
+                fontSize: '14px', 
+                color: currentTheme.colors.textTertiary,
+                fontWeight: 400
+              }}>
+                Visualisation des changements de statut basés sur la date Madagascar (UTC+3)
+              </p>
+            </div>
+
+            {/* Boutons d'action */}
+            <div style={{ 
+              display: 'flex', 
+              gap: '12px', 
+              marginBottom: '24px',
+              flexWrap: 'wrap'
+            }}>
+              <button
+                onClick={updateStatuses}
+                disabled={loadingStatusChanges}
+                style={{
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '12px 24px',
+                  cursor: loadingStatusChanges ? 'not-allowed' : 'pointer',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  opacity: loadingStatusChanges ? 0.6 : 1,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <i className={`fas ${loadingStatusChanges ? 'fa-spinner fa-spin' : 'fa-sync-alt'}`}></i>
+                Mettre à jour les statuts
+              </button>
+              <button
+                onClick={loadStatusChanges}
+                disabled={loadingStatusChanges}
+                style={{
+                  backgroundColor: currentTheme.colors.cardBackground,
+                  color: currentTheme.colors.text,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '8px',
+                  padding: '12px 24px',
+                  cursor: loadingStatusChanges ? 'not-allowed' : 'pointer',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <i className={`fas ${loadingStatusChanges ? 'fa-spinner fa-spin' : 'fa-refresh'}`}></i>
+                Actualiser
+              </button>
+            </div>
+
+            {/* Résumé */}
+            {statusChanges?.data && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '16px',
+                marginBottom: '24px'
+              }}>
+                <div style={{
+                  background: currentTheme.colors.cardBackground,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '12px',
+                  padding: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#007bff', marginBottom: '8px' }}>
+                    {statusChanges.data.currentMonth}
+                  </div>
+                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    Mois actuel (Madagascar)
+                  </div>
+                </div>
+                <div style={{
+                  background: currentTheme.colors.cardBackground,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '12px',
+                  padding: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#ef4444', marginBottom: '8px' }}>
+                    {statusChanges.data.needsUpdate}
+                  </div>
+                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    À mettre à jour
+                  </div>
+                </div>
+                <div style={{
+                  background: currentTheme.colors.cardBackground,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '12px',
+                  padding: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>
+                    {statusChanges.data.allGood}
+                  </div>
+                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    Statuts corrects
+                  </div>
+                </div>
+                <div style={{
+                  background: currentTheme.colors.cardBackground,
+                  border: `1px solid ${currentTheme.colors.border}`,
+                  borderRadius: '12px',
+                  padding: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, marginBottom: '8px' }}>
+                    {statusChanges.data.total}
+                  </div>
+                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                    Total conventions
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des changements */}
+            {loadingStatusChanges ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <i className="fas fa-spinner fa-spin" style={{ fontSize: '32px', marginBottom: '16px', color: currentTheme.colors.primary }}></i>
+                <div style={{ fontSize: '14px', fontWeight: 500 }}>Chargement des changements de statut...</div>
+              </div>
+            ) : statusChanges?.data ? (
+              <div>
+                {/* Conventions à mettre à jour */}
+                {statusChanges.data.changes.filter(c => c.needsUpdate).length > 0 ? (
+                  <div style={{ marginBottom: '32px' }}>
+                    <h2 style={{ 
+                      fontSize: '20px', 
+                      fontWeight: 600, 
+                      color: currentTheme.colors.text,
+                      marginBottom: '16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <i className="fas fa-exclamation-triangle" style={{ color: '#ef4444' }}></i>
+                      Conventions nécessitant une mise à jour ({statusChanges.data.changes.filter(c => c.needsUpdate).length})
+                    </h2>
+                    <div style={{
+                      display: 'grid',
+                      gap: '12px'
+                    }}>
+                      {statusChanges.data.changes.filter(c => c.needsUpdate).map((change) => (
+                        <div
+                          key={change.numConv}
+                          style={{
+                            background: currentTheme.colors.cardBackground,
+                            border: `1px solid ${change.expectedStatus === 'Confirmé' ? '#10b981' : '#f59e0b'}`,
+                            borderRadius: '12px',
+                            padding: '20px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            transition: 'all 0.2s ease'
+                          }}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                              <span style={{ 
+                                fontWeight: 700, 
+                                fontSize: '16px', 
+                                color: currentTheme.colors.text 
+                              }}>
+                                Convention #{change.numConv}
+                              </span>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                background: change.currentStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                color: change.currentStatus === 'Confirmé' ? '#166534' : '#92400e'
+                              }}>
+                                {change.currentStatus}
+                              </span>
+                              <i className="fas fa-arrow-right" style={{ color: currentTheme.colors.textTertiary }}></i>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                background: change.expectedStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                color: change.expectedStatus === 'Confirmé' ? '#166534' : '#92400e'
+                              }}>
+                                {change.expectedStatus}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              <strong>Client:</strong> {change.locataire?.nomcli || 'N/A'}
+                            </div>
+                            <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                              <strong>Bâtiment:</strong> {change.batiment?.adresse || 'N/A'}
+                            </div>
+                            {change.lastPaymentMonth && (
+                              <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary, marginBottom: '4px' }}>
+                                <strong>Dernier paiement:</strong> {change.lastPaymentMonth}
+                              </div>
+                            )}
+                            <div style={{ fontSize: '13px', color: currentTheme.colors.textTertiary, fontStyle: 'italic', marginTop: '8px' }}>
+                              {change.reason}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid #10b981`,
+                    borderRadius: '12px',
+                    padding: '24px',
+                    marginBottom: '32px',
+                    textAlign: 'center'
+                  }}>
+                    <i className="fas fa-check-circle" style={{ fontSize: '32px', color: '#10b981', marginBottom: '12px' }}></i>
+                    <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: currentTheme.colors.text }}>
+                      ✅ Tous les statuts sont à jour !
+                    </p>
+                    <p style={{ margin: '8px 0 0', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                      Aucune convention ne nécessite de mise à jour. Tous les statuts correspondent aux paiements actuels.
+                    </p>
+                  </div>
+                )}
+
+                {/* Toutes les conventions */}
+                <div>
+                  <h2 style={{ 
+                    fontSize: '20px', 
+                    fontWeight: 600, 
+                    color: currentTheme.colors.text,
+                    marginBottom: '16px'
+                  }}>
+                    Toutes les conventions ({statusChanges.data.total})
+                  </h2>
+                  <div style={{
+                    background: currentTheme.colors.cardBackground,
+                    border: `1px solid ${currentTheme.colors.border}`,
+                    borderRadius: '12px',
+                    overflow: 'hidden'
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: currentTheme.colors.backgroundTertiary, borderBottom: `1px solid ${currentTheme.colors.border}` }}>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>N° Conv.</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Client</th>
+                          <th style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut actuel</th>
+                          <th style={{ padding: '12px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Statut attendu</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Dernier paiement</th>
+                          <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary }}>Raison</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {statusChanges.data.changes.map((change, index) => (
+                          <tr 
+                            key={change.numConv}
+                            style={{
+                              borderBottom: index < statusChanges.data.changes.length - 1 ? `1px solid ${currentTheme.colors.border}` : 'none',
+                              background: change.needsUpdate ? (isDark ? 'rgba(239, 68, 68, 0.1)' : '#fef2f2') : 'transparent'
+                            }}
+                          >
+                            <td style={{ padding: '12px', fontSize: '14px', fontWeight: 600, color: currentTheme.colors.text }}>
+                              #{change.numConv}
+                            </td>
+                            <td style={{ padding: '12px', fontSize: '14px', color: currentTheme.colors.text }}>
+                              {change.locataire?.nomcli || 'N/A'}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                background: change.currentStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                color: change.currentStatus === 'Confirmé' ? '#166534' : '#92400e'
+                              }}>
+                                {change.currentStatus}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
+                                fontWeight: 600,
+                                background: change.expectedStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
+                                color: change.expectedStatus === 'Confirmé' ? '#166534' : '#92400e'
+                              }}>
+                                {change.expectedStatus}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px', fontSize: '14px', color: currentTheme.colors.textTertiary }}>
+                              {change.lastPaymentMonth || 'Aucun'}
+                            </td>
+                            <td style={{ padding: '12px', fontSize: '13px', color: currentTheme.colors.textTertiary, fontStyle: 'italic' }}>
+                              {change.reason}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : msg && (msg.includes('Erreur') || msg.includes('Accès') || msg.includes('Session')) ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#ef4444' }}>
+                <i className="fas fa-exclamation-triangle" style={{ fontSize: '48px', marginBottom: '16px', color: '#ef4444' }}></i>
+                <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#ef4444' }}>Erreur de chargement</p>
+                <p style={{ margin: '8px 0 16px', fontSize: '14px', color: '#6b7280' }}>{msg}</p>
+                <button
+                  onClick={loadStatusChanges}
+                  disabled={loadingStatusChanges}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: loadingStatusChanges ? 'not-allowed' : 'pointer',
+                    fontWeight: '600',
+                    opacity: loadingStatusChanges ? 0.6 : 1
+                  }}
+                >
+                  {loadingStatusChanges ? 'Chargement...' : 'Réessayer'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: currentTheme.colors.textTertiary }}>
+                <i className="fas fa-info-circle" style={{ fontSize: '48px', marginBottom: '16px', color: '#d1d5db' }}></i>
+                <p style={{ margin: 0, fontSize: '16px' }}>Aucune donnée disponible</p>
+                <p style={{ margin: '8px 0 0', fontSize: '14px' }}>Cliquez sur "Actualiser" pour charger les données</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeSection === 'parametres' && (
           <div>
             {/* Header */}
@@ -5067,11 +5550,6 @@ export default function RedacteurHome() {
                           value={step2.delivcin} 
                           onChange={e => {
                             const selectedDate = e.target.value;
-                            // Validation : la date doit être >= date de naissance + 18 ans
-                            if (minDateDelivranceLogic && selectedDate < minDateDelivranceLogic) {
-                              alert(`La date de délivrance CIN doit être au minimum le ${new Date(minDateDelivranceLogic).toLocaleDateString('fr-FR')} (18 ans après la date de naissance)`);
-                              return;
-                            }
                             // Validation : la date ne doit pas être dans le futur
                             if (selectedDate > maxDateDelivrance) {
                               alert('La date de délivrance CIN ne peut pas être dans le futur');
@@ -5091,7 +5569,7 @@ export default function RedacteurHome() {
                               opacity: 0.6
                             })
                           }}
-                          title={!step2.datenais ? 'Veuillez d\'abord saisir la date de naissance' : minDateDelivranceLogic ? `Date de délivrance CIN (minimum: ${new Date(minDateDelivranceLogic).toLocaleDateString('fr-FR')})` : 'Date de délivrance CIN'}
+                          title={!step2.datenais ? 'Veuillez d\'abord saisir la date de naissance' : 'Date de délivrance CIN'}
                         />
                     </div>
                     <div>

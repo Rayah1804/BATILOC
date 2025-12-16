@@ -15,8 +15,41 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Connexion base de données - Ne pas bloquer le démarrage si DB échoue
 dbConn.authenticate()
-  .then(() => {
+  .then(async () => {
     console.log("✅ Connexion à la base de données réussie");
+    
+    // Vérifier et mettre à jour automatiquement les statuts des conventions
+    // en fonction du dernier paiement mensuel (synchronisation automatique)
+    try {
+      const factureRouter = require("./api/facture");
+      if (factureRouter.checkAndUpdateConventionStatuses) {
+        // Exécuter la vérification après un court délai pour s'assurer que la DB est prête
+        setTimeout(async () => {
+          try {
+            console.log("🔄 Synchronisation automatique des statuts au démarrage...");
+            await factureRouter.checkAndUpdateConventionStatuses();
+            console.log("✅ Synchronisation automatique terminée");
+          } catch (err) {
+            console.error("⚠️ Erreur lors de la synchronisation automatique des statuts au démarrage:", err.message);
+            // Ne pas bloquer le démarrage du serveur en cas d'erreur
+          }
+        }, 2000); // Attendre 2 secondes après la connexion DB
+        
+        // Programmer une synchronisation périodique toutes les heures
+        setInterval(async () => {
+          try {
+            console.log("🔄 Synchronisation périodique des statuts...");
+            await factureRouter.checkAndUpdateConventionStatuses();
+            console.log("✅ Synchronisation périodique terminée");
+          } catch (err) {
+            console.error("⚠️ Erreur lors de la synchronisation périodique:", err.message);
+          }
+        }, 60 * 60 * 1000); // Toutes les heures (3600000 ms)
+      }
+    } catch (err) {
+      console.error("⚠️ Impossible de charger la fonction de synchronisation automatique:", err.message);
+      // Ne pas bloquer le démarrage du serveur
+    }
   })
   .catch((err) => {
     console.error("⚠️ ATTENTION: Erreur de connexion à la base de données:", err.message);
@@ -57,7 +90,12 @@ app.use("/api/factures", authenticateToken, require("./api/facture"));
 
 // Route de santé
 app.get("/health", (req, res) => {
-  res.json({ status: "OK", timestamp: new Date().toISOString() });
+  const madagascarDate = require("./utils/madagascarDate");
+  res.json({ 
+    status: "OK", 
+    timestamp: madagascarDate.getMadagascarDate().toISOString(),
+    timezone: "Africa/Nairobi (UTC+3)"
+  });
 });
 
 // Route principale
