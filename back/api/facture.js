@@ -525,6 +525,13 @@ router.post("/", requireRole('caissier', 'administrateur'), async (req, res) => 
 });
 
 // PUT - Mettre à jour une facture (statut de paiement)
+// ⚠️ IMPORTANT :
+// - Cette route met maintenant à jour le statut de la convention en utilisant
+//   EXACTEMENT la même logique que checkAndUpdateConventionStatuses :
+//   -> On regarde le DERNIER paiement (facture payée la plus récente)
+//   -> On compare son mois/année avec le mois/année ACTUEL Madagascar (UTC+3)
+//   -> Si paiement du mois actuel => statutConv = true (Confirmé)
+//   -> Sinon ou aucun paiement => statutConv = false (En attente)
 router.put("/:numFact", requireRole('caissier', 'administrateur'), async (req, res) => {
   const t = await sequelize.transaction();
   try {
@@ -549,26 +556,67 @@ router.put("/:numFact", requireRole('caissier', 'administrateur'), async (req, r
 
     await facture.update(updates, { transaction: t });
 
-    // Mettre à jour automatiquement le statut de la convention en recalculant sur toutes les factures
+    // Mettre à jour automatiquement le statut de la convention
+    // en recalculant le dernier paiement avec la MÊME logique que le moteur mensuel
     const convention = await Convention.findByPk(facture.numConv, { transaction: t });
     
     if (convention && statutPaiement !== undefined) {
-      const facturesPayees = await Facture.count({
+      // Récupérer la dernière facture PAYÉE pour cette convention
+      const lastPaidFacture = await Facture.findOne({
         where: {
           numConv: convention.numConv,
           statutPaiement: true
         },
+        order: [['mois', 'DESC']],
         transaction: t
       });
 
+      // Valeur actuelle du statut
       const previousStatutConv = !!convention.statutConv;
-      const shouldBeConfirmed = facturesPayees > 0;
+
+      let shouldBeConfirmed = false;
+
+      if (lastPaidFacture) {
+        // Date de la dernière facture payée
+        const factureMois = new Date(lastPaidFacture.mois);
+        const factureYear = factureMois.getFullYear();
+        const factureMonth = factureMois.getMonth() + 1;
+
+        // Date actuelle Madagascar (UTC+3)
+        const currentYear = madagascarDate.getMadagascarYear();
+        const currentMonth = madagascarDate.getMadagascarMonth();
+
+        // Même logique que partout ailleurs dans le projet :
+        // isCurrentMonthPaid = (factureYear === currentYear && factureMonth === currentMonth);
+        // -> Gère automatiquement le changement d'année (décembre -> janvier, etc.)
+        const isCurrentMonthPaid = (factureYear === currentYear && factureMonth === currentMonth);
+        shouldBeConfirmed = isCurrentMonthPaid;
+
+        console.log(
+          `🔁 Recalcul statut convention ${convention.numConv} après paiement : ` +
+          `dernier paiement ${factureYear}-${String(factureMonth).padStart(2, '0')} | ` +
+          `mois actuel ${currentYear}-${String(currentMonth).padStart(2, '0')} | ` +
+          `isCurrentMonthPaid=${isCurrentMonthPaid}`
+        );
+      } else {
+        // Aucun paiement trouvé -> En attente
+        shouldBeConfirmed = false;
+        console.log(
+          `🔁 Recalcul statut convention ${convention.numConv} après paiement : ` +
+          `aucun paiement trouvé -> shouldBeConfirmed = false (En attente)`
+        );
+      }
 
       if (previousStatutConv !== shouldBeConfirmed) {
         await convention.update({ statutConv: shouldBeConfirmed }, { transaction: t });
         console.log(
-          `✅ Statut de la convention ${convention.numConv} mis à jour: ` +
+          `✅ Statut de la convention ${convention.numConv} mis à jour (via PUT /factures): ` +
           `${previousStatutConv ? 'Confirmé' : 'En attente'} -> ${shouldBeConfirmed ? 'Confirmé' : 'En attente'}`
+        );
+      } else {
+        console.log(
+          `ℹ️ Statut de la convention ${convention.numConv} inchangé (via PUT /factures) : ` +
+          `${previousStatutConv ? 'Confirmé' : 'En attente'}`
         );
       }
     }
@@ -618,6 +666,32 @@ router.delete("/:numFact", requireRole('caissier', 'administrateur'), async (req
     res.status(500).json({
       status: 500,
       message: "Erreur serveur",
+      error: err.message
+    });
+  }
+});
+
+// DELETE - Supprimer TOUTES les factures (réinitialisation complète)
+// ⚠️ DANGEREUX : réservé à l'administrateur, par exemple pour remettre la
+//     base à zéro avant une nouvelle démonstration.
+router.delete("/all", requireRole('administrateur'), async (req, res) => {
+  try {
+    const deletedCount = await Facture.destroy({
+      where: {}
+    });
+
+    console.log(`🗑️ Suppression de ${deletedCount} facture(s) (factures + paiements)`);
+
+    return res.status(200).json({
+      status: 200,
+      message: `Toutes les factures ont été supprimées (${deletedCount} enregistrements).`,
+      deleted: deletedCount
+    });
+  } catch (err) {
+    console.error("Erreur DELETE toutes les factures:", err);
+    return res.status(500).json({
+      status: 500,
+      message: "Erreur serveur lors de la suppression de toutes les factures",
       error: err.message
     });
   }

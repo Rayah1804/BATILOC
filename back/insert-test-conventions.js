@@ -13,14 +13,19 @@ const Locataire = require('./models/locataire')(sequelize, DataTypes);
 const Convention = require('./models/convention')(sequelize, DataTypes);
 
 // Fonction pour obtenir l'année courante au format DATEONLY
-function getCurrentYearDateOnly() {
-  const y = new Date().getFullYear();
-  return `${y}-01-01`;
+// Retourne une date DATEONLY (YYYY-MM-DD) pour une année donnée
+// en utilisant le même mois/jour que la date actuelle pour que la date soit "logique" (aujourd'hui ou déjà passée)
+function getYearDateOnly(year) {
+  const now = new Date();
+  // mois indexé 0
+  const month = now.getMonth();
+  const day = Math.min(now.getDate(), 28); // éviter les problèmes de 29-30-31 pour février
+  const d = new Date(year, month, day);
+  return d.toISOString().slice(0, 10);
 }
 
-// Fonction pour obtenir une date d'une année spécifique
-function getYearDateOnly(year) {
-  return `${year}-01-01`;
+function getCurrentYearDateOnly() {
+  return getYearDateOnly(new Date().getFullYear());
 }
 
 // Données de locataires de test (seront créés s'ils n'existent pas)
@@ -248,7 +253,6 @@ async function insertTestConventions() {
       // Créer la convention
       // Le champ lieu est limité à 10 caractères
       const lieu = batiment.adresse.substring(0, 10).toUpperCase();
-      
       const convention = await Convention.create({
         lieu: lieu,
         dateConv: getYearDateOnly(config.year),
@@ -263,7 +267,7 @@ async function insertTestConventions() {
       console.log(`   🏢 Bâtiment: #${batiment.numBat} - ${batiment.adresse}`);
       console.log(`   👤 Locataire: ${locataire.nomcli} (CIN: ${locataire.cin})`);
       console.log(`   💰 Loyer: ${batiment.montant || 0} Ar`);
-      console.log(`   📅 Date: ${config.year}-01-01`);
+  console.log(`   📅 Date: ${getYearDateOnly(config.year)}`);
       console.log(`   📊 Statut: ${convention.statutConv ? '✅ Confirmé' : '⏳ En attente'}`);
       console.log(`   📝 ${config.description}`);
       console.log('');

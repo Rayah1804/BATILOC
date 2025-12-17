@@ -11,10 +11,16 @@ const Mbatiment = require('./models/mbatiment')(sequelize, DataTypes);
 const Locataire = require('./models/locataire')(sequelize, DataTypes);
 const Convention = require('./models/convention')(sequelize, DataTypes);
 
-// Fonction pour obtenir l'année courante au format DATEONLY
+// Retourne une date DATEONLY (YYYY-MM-DD) pour l'année donnée en réutilisant le mois/jour courants
+function getYearDateOnly(year) {
+  const now = new Date();
+  const month = now.getMonth();
+  const day = Math.min(now.getDate(), 28);
+  return new Date(year, month, day).toISOString().slice(0, 10);
+}
+
 function getCurrentYearDateOnly() {
-  const y = new Date().getFullYear();
-  return `${y}-01-01`;
+  return getYearDateOnly(new Date().getFullYear());
 }
 
 async function createConventionsEnAttente() {

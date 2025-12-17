@@ -210,6 +210,7 @@ router.get("/", async (req, res) => {
 router.get("/available-for-invoice", async (req, res) => {
   try {
     // Récupérer toutes les conventions "En attente" (statutConv = false)
+    // Ces conventions sont en retard et doivent recevoir une nouvelle facture
     const conventions = await Convention.findAll({
       where: {
         statutConv: false // Seulement "En attente"
@@ -217,20 +218,43 @@ router.get("/available-for-invoice", async (req, res) => {
       order: [["numConv", "DESC"]]
     });
 
-    // Récupérer toutes les factures existantes pour ces conventions
+    // Si aucune convention en attente, retourner tout de suite
+    if (conventions.length === 0) {
+      return res.status(200).json({
+        status: 200,
+        message: "Aucune convention en attente disponible pour création de facture",
+        data: []
+      });
+    }
+
+    // On ne doit PAS exclure une convention juste parce qu'elle a déjà
+    // une facture ancienne. On veut seulement éviter de dupliquer la
+    // facture du MOIS ACTUEL.
+    //
+    // → On cherche donc uniquement les factures du mois actuel Madagascar (UTC+3)
+    //    pour ces conventions.
+    const currentYear = madagascarDate.getMadagascarYear();
+    const currentMonth = madagascarDate.getMadagascarMonth();
+    const currentMonthDate = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
+    const currentMonthStr = currentMonthDate.toISOString().split('T')[0]; // YYYY-MM-01
+
+    // Récupérer les factures du mois actuel pour ces conventions
     const numConvs = conventions.map(c => c.numConv);
-    const factures = numConvs.length > 0 
-      ? await Facture.findAll({
-          where: { numConv: { [Op.in]: numConvs } },
-          attributes: ['numConv']
-        })
-      : [];
+    const facturesMoisActuel = await Facture.findAll({
+      where: { 
+        numConv: { [Op.in]: numConvs },
+        mois: currentMonthStr
+      },
+      attributes: ['numConv']
+    });
 
-    // Créer un Set des numConvs qui ont déjà une facture
-    const conventionsAvecFacture = new Set(factures.map(f => f.numConv));
+    // Créer un Set des numConvs qui ont DÉJÀ une facture pour le mois actuel
+    const conventionsAvecFactureMoisActuel = new Set(facturesMoisActuel.map(f => f.numConv));
 
-    // Filtrer les conventions qui n'ont pas encore de facture
-    const conventionsDisponibles = conventions.filter(c => !conventionsAvecFacture.has(c.numConv));
+    // Filtrer les conventions qui n'ont PAS encore de facture pour le mois actuel
+    const conventionsDisponibles = conventions.filter(
+      c => !conventionsAvecFactureMoisActuel.has(c.numConv)
+    );
 
     // Récupérer les bâtiments et locataires associés
     const numBats = [...new Set(conventionsDisponibles.map(c => c.numBat))];

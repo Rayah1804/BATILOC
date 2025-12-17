@@ -1646,70 +1646,60 @@ export default function CaissierHome() {
               </div>
             </div>
 
-            {/* Résumé */}
+            {/* Résumé (design adouci) */}
             {statusChanges?.data && (
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: '16px',
-                marginBottom: '24px'
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '12px',
+                marginBottom: '20px'
               }}>
-                <div style={{
-                  background: currentTheme.colors.cardBackground,
-                  border: `1px solid ${currentTheme.colors.border}`,
-                  borderRadius: '12px',
-                  padding: '20px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#007bff', marginBottom: '8px' }}>
-                    {statusChanges.data.currentMonth}
+                {[
+                  {
+                    label: 'Mois actuel (Madagascar)',
+                    value: statusChanges.data.currentMonth,
+                  },
+                  {
+                    label: 'À mettre à jour',
+                    value: statusChanges.data.needsUpdate,
+                  },
+                  {
+                    label: 'Statuts corrects',
+                    value: statusChanges.data.allGood,
+                  },
+                  {
+                    label: 'Total conventions',
+                    value: statusChanges.data.total,
+                  },
+                ].map((item, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      background: currentTheme.colors.cardBackground,
+                      border: `1px solid ${currentTheme.colors.border}`,
+                      borderRadius: '10px',
+                      padding: '16px 18px',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{
+                      fontSize: '12px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: currentTheme.colors.textTertiary,
+                      marginBottom: '6px',
+                    }}>
+                      {item.label}
+                    </div>
+                    <div style={{
+                      fontSize: '22px',
+                      fontWeight: 600,
+                      color: currentTheme.colors.text,
+                    }}>
+                      {item.value}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                    Mois actuel (Madagascar)
-                  </div>
-                </div>
-                <div style={{
-                  background: currentTheme.colors.cardBackground,
-                  border: `1px solid ${currentTheme.colors.border}`,
-                  borderRadius: '12px',
-                  padding: '20px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#ef4444', marginBottom: '8px' }}>
-                    {statusChanges.data.needsUpdate}
-                  </div>
-                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                    À mettre à jour
-                  </div>
-                </div>
-                <div style={{
-                  background: currentTheme.colors.cardBackground,
-                  border: `1px solid ${currentTheme.colors.border}`,
-                  borderRadius: '12px',
-                  padding: '20px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '32px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>
-                    {statusChanges.data.allGood}
-                  </div>
-                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                    Statuts corrects
-                  </div>
-                </div>
-                <div style={{
-                  background: currentTheme.colors.cardBackground,
-                  border: `1px solid ${currentTheme.colors.border}`,
-                  borderRadius: '12px',
-                  padding: '20px',
-                  textAlign: 'center'
-                }}>
-                  <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, marginBottom: '8px' }}>
-                    {statusChanges.data.total}
-                  </div>
-                  <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                    Total conventions
-                  </div>
-                </div>
+                ))}
               </div>
             )}
 
@@ -1764,23 +1754,25 @@ export default function CaissierHome() {
                                 Convention #{change.numConv}
                               </span>
                               <span style={{
-                                padding: '4px 12px',
-                                borderRadius: '12px',
+                                padding: '3px 10px',
+                                borderRadius: '999px',
                                 fontSize: '12px',
-                                fontWeight: 600,
-                                background: change.currentStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
-                                color: change.currentStatus === 'Confirmé' ? '#166534' : '#92400e'
+                                fontWeight: 500,
+                                background: currentTheme.colors.backgroundTertiary,
+                                color: currentTheme.colors.text,
+                                border: `1px solid ${currentTheme.colors.border}`
                               }}>
                                 {change.currentStatus}
                               </span>
                               <i className="fas fa-arrow-right" style={{ color: currentTheme.colors.textTertiary }}></i>
                               <span style={{
-                                padding: '4px 12px',
-                                borderRadius: '12px',
+                                padding: '3px 10px',
+                                borderRadius: '999px',
                                 fontSize: '12px',
-                                fontWeight: 600,
-                                background: change.expectedStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
-                                color: change.expectedStatus === 'Confirmé' ? '#166534' : '#92400e'
+                                fontWeight: 500,
+                                background: currentTheme.colors.backgroundTertiary,
+                                color: currentTheme.colors.text,
+                                border: `1px solid ${currentTheme.colors.border}`
                               }}>
                                 {change.expectedStatus}
                               </span>

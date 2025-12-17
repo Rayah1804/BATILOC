@@ -48,7 +48,8 @@ export default function AdminDashboard() {
   const [batiments, setBatiments] = useState([]);
   const [utilisateurs, setUtilisateurs] = useState([]);
   const [conventions, setConventions] = useState([]);
-  const [activeSection, setActiveSection] = useState('batiments'); // 'batiments', 'utilisateurs', 'conventions', 'statistiques', 'parametres', 'historique', 'demandes', 'statuts'
+  // Par défaut, afficher la vue (dashboard) en premier plutôt que les bâtiments
+  const [activeSection, setActiveSection] = useState('dashboard'); // 'batiments', 'utilisateurs', 'conventions', 'statistiques', 'parametres', 'historique', 'demandes', 'statuts'
   const [demandesSuppression, setDemandesSuppression] = useState([]);
   const [loadingDemandes, setLoadingDemandes] = useState(false);
   const [demandesModification, setDemandesModification] = useState([]);
@@ -297,6 +298,41 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Erreur lors du chargement du profil:', error);
     }
+  };
+
+  // Exporter les conventions au format CSV
+  const exportConventions = () => {
+    if (!conventions || conventions.length === 0) {
+      setMsg('Aucune convention à exporter');
+      setTimeout(() => setMsg(''), 3000);
+      return;
+    }
+
+    const headers = ['NumConv', 'DateConv', 'Adresse', 'Ville', 'Quartier', 'Montant', 'Locataire', 'Contact'];
+    const rows = conventions.map(c => {
+      const num = c.numConv || '';
+      const date = c.dateConv ? new Date(c.dateConv).toLocaleDateString('fr-FR') : '';
+      const adresse = c.batiment?.adresse || '';
+      const ville = c.batiment?.ville || 'Fianarantsoa';
+  const quartier = c.batiment?.quartier || 'Zone Est';
+      const montant = c.batiment?.montant != null ? String(c.batiment.montant) : '';
+      const loc = c.locataire?.nomcli || '';
+      const contact = c.locataire?.contact || '';
+      return [num, date, adresse, ville, quartier, montant, loc, contact];
+    });
+
+    const csvContent = [headers, ...rows].map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conventions_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setMsg('Export terminé');
+    setTimeout(() => setMsg(''), 3000);
   };
 
   const loadHistorique = async () => {
@@ -577,7 +613,20 @@ export default function AdminDashboard() {
       const j = await r.json();
       if (j.status === 200) {
         // Forcer la mise à jour avec les nouvelles données
-        setConventions(j.data || []);
+    // Normaliser les valeurs manquantes : ville => 'Fianarantsoa', quartier => 'Zone Est'
+        const normalized = (j.data || []).map(c => {
+          const bat = c.batiment ? { ...c.batiment } : {};
+          const v = (bat.ville || '').toString().trim();
+          const q = (bat.quartier || '').toString().trim();
+          if (!v || v === '' || v.toLowerCase() === 'non renseignée' || v.toLowerCase() === 'non renseignee') {
+            bat.ville = 'Fianarantsoa';
+          }
+          if (!q || q === '' || q.toLowerCase() === 'non renseigné' || q.toLowerCase() === 'non renseignee') {
+            bat.quartier = 'Zone Est';
+          }
+          return { ...c, batiment: bat };
+        });
+        setConventions(normalized);
         // Mettre à jour aussi searchConventions si un paramètre q est passé
         if (q !== undefined && q !== '') {
           setSearchConventions(q);
@@ -2434,11 +2483,12 @@ export default function AdminDashboard() {
         <nav style={{ flex: 1 }}>
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '4px' }}>
             {[
+              // Mettre 'Vue' en premier visuellement
+              { icon: 'fa-chart-line', label: 'Vue', section: 'dashboard', active: activeSection === 'dashboard' },
               { icon: 'fa-building', label: 'Bâtiments', section: 'batiments', active: activeSection === 'batiments' },
               { icon: 'fa-users', label: 'Utilisateurs', section: 'utilisateurs', active: activeSection === 'utilisateurs' },
               { icon: 'fa-file-contract', label: 'Conventions', section: 'conventions', active: activeSection === 'conventions' },
               { icon: 'fa-sync-alt', label: 'Changements de statut', section: 'statuts', active: activeSection === 'statuts', badge: statusChanges?.data?.needsUpdate || 0 },
-              { icon: 'fa-chart-line', label: 'Vue', section: 'dashboard', active: activeSection === 'dashboard' },
               { icon: 'fa-history', label: 'Historique', section: 'historique', active: activeSection === 'historique' },
               { icon: 'fa-exclamation-triangle', label: 'Demandes', section: 'demandes', active: activeSection === 'demandes', badge: demandesModification.filter(d => d.statut === 'en_attente').length + demandesCreation.filter(d => d.statut === 'en_attente').length + demandesReset.filter(d => d.statut === 'en_attente').length },
               { icon: 'fa-cog', label: 'Paramètres', section: 'parametres', active: activeSection === 'parametres' },
@@ -4086,47 +4136,10 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Boutons d'action */}
-              <div style={{ 
-                display: 'grid', 
-                gridTemplateColumns: 'repeat(2, 1fr)', 
-                gap: '20px', 
-                marginBottom: '32px' 
-              }}>
-                {/* Bouton Nouvelle convention - Désactivé pour l'admin (seulement suppression autorisée) */}
-                {/* Le bouton de création de convention a été retiré pour l'administrateur */}
-
-                {/* Bouton Exporter */}
-                <button
-                  onClick={() => {}}
-                  style={{
-                    background: currentTheme.colors.cardBackground,
-                    border: `1px solid ${currentTheme.colors.border}`,
-                    transition: 'all 0.2s ease',
-                    color: currentTheme.colors.text,
-                    borderRadius: '12px',
-                    padding: '24px',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#9ca3af';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#d1d5db';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                    <i className="fas fa-download" style={{ fontSize: '20px', color: '#6b7280' }}></i>
-                    <span style={{ fontSize: '16px', fontWeight: 600 }}>Exporter les données</span>
-                  </div>
-                  <div style={{ fontSize: '13px', color: '#6b7280' }}>Télécharger un rapport</div>
-                </button>
+              {/* Controls: compact area (export moved into table header) */}
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '12px' }}>
+                {/* Small helper text or future filters can go here */}
+                <div style={{ color: currentTheme.colors.textTertiary, fontSize: '13px' }}>Conventions</div>
               </div>
 
               {msg && (
@@ -4160,40 +4173,65 @@ export default function AdminDashboard() {
                   }}>
                     Conventions récentes
                   </h2>
-                  {/* Barre de recherche */}
-                  <div style={{ position: 'relative' }}>
-                    <i className="fas fa-search" style={{
-                      position: 'absolute',
-                      left: '12px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: '#9ca3af',
-                      fontSize: '14px',
-                    }}></i>
-                    <input
-                      type="search"
-                      placeholder="Rechercher par N° Convention, Client, Date ou Montant..."
-                      value={searchConventions}
-                      onChange={(e) => {
-                        const q = e.target.value;
-                        setSearchConventions(q);
-                        loadConventions(q);
-                      }}
-                      style={{
-                        padding: '8px 12px 8px 36px',
-                        borderRadius: '8px',
-                        border: '1px solid #d1d5db',
-                        width: '250px',
+                  {/* Barre de recherche + Export */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ position: 'relative' }}>
+                      <i className="fas fa-search" style={{
+                        position: 'absolute',
+                        left: '12px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: '#9ca3af',
                         fontSize: '14px',
-                        outline: 'none',
+                      }}></i>
+                      <input
+                        type="search"
+                        placeholder="Rechercher par N° Convention, Client, Date ou Montant..."
+                        value={searchConventions}
+                        onChange={(e) => {
+                          const q = e.target.value;
+                          setSearchConventions(q);
+                          loadConventions(q);
+                        }}
+                        style={{
+                          padding: '8px 12px 8px 36px',
+                          borderRadius: '8px',
+                          border: '1px solid #d1d5db',
+                          width: '300px',
+                          fontSize: '14px',
+                          outline: 'none',
+                        }}
+                        onFocus={(e) => {
+                          e.target.style.borderColor = currentTheme.colors.primary;
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.borderColor = currentTheme.colors.border;
+                        }}
+                      />
+                    </div>
+                    <button
+                      onClick={exportConventions}
+                      title="Exporter les conventions (CSV)"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: `1px solid ${currentTheme.colors.border}`,
+                        background: currentTheme.colors.cardBackground,
+                        cursor: 'pointer'
                       }}
-                      onFocus={(e) => {
-                        e.target.style.borderColor = currentTheme.colors.primary;
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = currentTheme.colors.backgroundTertiary;
                       }}
-                      onBlur={(e) => {
-                        e.target.style.borderColor = currentTheme.colors.border;
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = currentTheme.colors.cardBackground;
                       }}
-                    />
+                    >
+                      <i className="fas fa-download" style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}></i>
+                      <span style={{ fontSize: '13px', fontWeight: 600, color: currentTheme.colors.text }}>Exporter</span>
+                    </button>
                   </div>
                 </div>
 
@@ -4220,10 +4258,9 @@ export default function AdminDashboard() {
                         borderBottom: `1px solid ${currentTheme.colors.border}`
                       }}>
                         <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>N° Convention</th>
-                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Client</th>
-                        {hasContactData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Contact</th>}
-                        {hasVilleData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Ville</th>}
-                        {hasQuartierData && <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '10%' }}>Quartier</th>}
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 700, fontSize: '13px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '18%' }}>Client</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 700, fontSize: '13px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Ville</th>
+                        <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 700, fontSize: '13px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '12%' }}>Quartier</th>
                         <th style={{ padding: '12px 8px', textAlign: 'right', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Montant</th>
                         <th style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Statut</th>
                         <th style={{ padding: '12px 8px', textAlign: 'left', fontWeight: 600, fontSize: '12px', color: currentTheme.colors.textTertiary, textTransform: 'uppercase', letterSpacing: '0.5px', width: '8%' }}>Date</th>
@@ -4255,13 +4292,10 @@ export default function AdminDashboard() {
                             {c.locataire?.nomcli || 'N/A'}
                           </td>
                           <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
-                            {c.contact && c.contact.trim() !== '' && c.contact !== 'N/A' ? c.contact : '-'}
+                            {c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville.toLowerCase() !== 'non renseignée' ? c.batiment.ville : 'Fianarantsoa'}
                           </td>
                           <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
-                            {c.batiment?.ville && c.batiment.ville.trim() !== '' && c.batiment.ville !== 'Non renseignée' ? c.batiment.ville : '-'}
-                          </td>
-                          <td style={{ padding: '12px 8px', fontSize: '14px', color: currentTheme.colors.text }}>
-                            {c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier !== 'Non renseigné' ? c.batiment.quartier : '-'}
+                            {c.batiment?.quartier && c.batiment.quartier.trim() !== '' && c.batiment.quartier.toLowerCase() !== 'non renseigné' ? c.batiment.quartier : 'Zone Est'}
                           </td>
                           <td style={{ padding: '12px 8px', textAlign: 'right', fontSize: '14px', color: currentTheme.colors.text, fontWeight: 600 }}>
                             {Number(c.batiment?.montant || 0).toLocaleString('fr-FR')} Ar
@@ -4460,6 +4494,14 @@ export default function AdminDashboard() {
                       <div>
                         <strong style={{ color: currentTheme.colors.textSecondary }}>Adresse :</strong>{' '}
                         <span style={{ color: currentTheme.colors.text }}>{selectedConvention.batiment?.adresse || 'N/A'}</span>
+                      </div>
+                      <div>
+                        <strong style={{ color: currentTheme.colors.textSecondary }}>Ville :</strong>{' '}
+                        <span style={{ color: currentTheme.colors.text }}>{selectedConvention.batiment?.ville || 'Fianarantsoa'}</span>
+                      </div>
+                      <div>
+                        <strong style={{ color: currentTheme.colors.textSecondary }}>Quartier :</strong>{' '}
+                        <span style={{ color: currentTheme.colors.text }}>{selectedConvention.batiment?.quartier || 'Zone Est'}</span>
                       </div>
                       <div>
                         <strong style={{ color: currentTheme.colors.textSecondary }}>Loyer :</strong>{' '}
@@ -5932,70 +5974,60 @@ export default function AdminDashboard() {
                 </div>
               )}
 
-              {/* Résumé */}
+              {/* Résumé (design adouci) */}
               {statusChanges?.data && (
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '16px',
-                  marginBottom: '24px'
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '20px'
                 }}>
-                  <div style={{
-                    background: currentTheme.colors.cardBackground,
-                    border: `1px solid ${currentTheme.colors.border}`,
-                    borderRadius: '12px',
-                    padding: '20px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#007bff', marginBottom: '8px' }}>
-                      {statusChanges.data.currentMonth}
+                  {[
+                    {
+                      label: 'Mois actuel (Madagascar)',
+                      value: statusChanges.data.currentMonth,
+                    },
+                    {
+                      label: 'À mettre à jour',
+                      value: statusChanges.data.needsUpdate,
+                    },
+                    {
+                      label: 'Statuts corrects',
+                      value: statusChanges.data.allGood,
+                    },
+                    {
+                      label: 'Total conventions',
+                      value: statusChanges.data.total,
+                    },
+                  ].map((item, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        background: currentTheme.colors.cardBackground,
+                        border: `1px solid ${currentTheme.colors.border}`,
+                        borderRadius: '10px',
+                        padding: '16px 18px',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div style={{
+                        fontSize: '12px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em',
+                        color: currentTheme.colors.textTertiary,
+                        marginBottom: '6px',
+                      }}>
+                        {item.label}
+                      </div>
+                      <div style={{
+                        fontSize: '22px',
+                        fontWeight: 600,
+                        color: currentTheme.colors.text,
+                      }}>
+                        {item.value}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                      Mois actuel (Madagascar)
-                    </div>
-                  </div>
-                  <div style={{
-                    background: currentTheme.colors.cardBackground,
-                    border: `1px solid ${currentTheme.colors.border}`,
-                    borderRadius: '12px',
-                    padding: '20px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#ef4444', marginBottom: '8px' }}>
-                      {statusChanges.data.needsUpdate}
-                    </div>
-                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                      À mettre à jour
-                    </div>
-                  </div>
-                  <div style={{
-                    background: currentTheme.colors.cardBackground,
-                    border: `1px solid ${currentTheme.colors.border}`,
-                    borderRadius: '12px',
-                    padding: '20px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '32px', fontWeight: 700, color: '#10b981', marginBottom: '8px' }}>
-                      {statusChanges.data.allGood}
-                    </div>
-                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                      Statuts corrects
-                    </div>
-                  </div>
-                  <div style={{
-                    background: currentTheme.colors.cardBackground,
-                    border: `1px solid ${currentTheme.colors.border}`,
-                    borderRadius: '12px',
-                    padding: '20px',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{ fontSize: '32px', fontWeight: 700, color: currentTheme.colors.text, marginBottom: '8px' }}>
-                      {statusChanges.data.total}
-                    </div>
-                    <div style={{ fontSize: '14px', color: currentTheme.colors.textTertiary }}>
-                      Total conventions
-                    </div>
-                  </div>
+                  ))}
                 </div>
               )}
 
@@ -6049,25 +6081,27 @@ export default function AdminDashboard() {
                                 }}>
                                   Convention #{change.numConv}
                                 </span>
-                                <span style={{
-                                  padding: '4px 12px',
-                                  borderRadius: '12px',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  background: change.currentStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
-                                  color: change.currentStatus === 'Confirmé' ? '#166534' : '#92400e'
-                                }}>
+                              <span style={{
+                                padding: '3px 10px',
+                                borderRadius: '999px',
+                                fontSize: '12px',
+                                fontWeight: 500,
+                                background: currentTheme.colors.backgroundTertiary,
+                                color: currentTheme.colors.text,
+                                border: `1px solid ${currentTheme.colors.border}`
+                              }}>
                                   {change.currentStatus}
                                 </span>
                                 <i className="fas fa-arrow-right" style={{ color: currentTheme.colors.textTertiary }}></i>
-                                <span style={{
-                                  padding: '4px 12px',
-                                  borderRadius: '12px',
-                                  fontSize: '12px',
-                                  fontWeight: 600,
-                                  background: change.expectedStatus === 'Confirmé' ? '#dcfce7' : '#fef3c7',
-                                  color: change.expectedStatus === 'Confirmé' ? '#166534' : '#92400e'
-                                }}>
+                              <span style={{
+                                padding: '3px 10px',
+                                borderRadius: '999px',
+                                fontSize: '12px',
+                                fontWeight: 500,
+                                background: currentTheme.colors.backgroundTertiary,
+                                color: currentTheme.colors.text,
+                                border: `1px solid ${currentTheme.colors.border}`
+                              }}>
                                   {change.expectedStatus}
                                 </span>
                               </div>

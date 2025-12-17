@@ -20,20 +20,20 @@ SELECT codeCli, nomcli, cin FROM locataire LIMIT 10;
 
 -- Exemple 1: Convention pour le premier bâtiment et le premier locataire
 INSERT INTO convention (lieu, dateConv, statutConv, numFact, numBat, codeCli) 
-SELECT 'FIANARANTS', '2025-01-01', 0, NULL, b.numBat, l.codeCli
+SELECT 'FIANARANTS', CURDATE(), 0, NULL, b.numBat, l.codeCli
 FROM mbatiment b, locataire l
 LIMIT 1;
 
 -- Exemple 2: Créer plusieurs conventions (ajustez selon vos données)
 -- Remplacez les numBat et codeCli par des valeurs réelles de votre base
 INSERT INTO convention (lieu, dateConv, statutConv, numFact, numBat, codeCli) VALUES
-('FIANARANTS', '2025-01-01', 0, NULL, 
+('FIANARANTS', CURDATE(), 0, NULL, 
     (SELECT numBat FROM mbatiment ORDER BY numBat LIMIT 1 OFFSET 0),
     (SELECT codeCli FROM locataire ORDER BY codeCli LIMIT 1 OFFSET 0)),
-('FIANARANTS', '2025-01-01', 0, NULL,
+('FIANARANTS', CURDATE(), 0, NULL,
     (SELECT numBat FROM mbatiment ORDER BY numBat LIMIT 1 OFFSET 1),
     (SELECT codeCli FROM locataire ORDER BY codeCli LIMIT 1 OFFSET 0)),
-('FIANARANTS', '2025-01-01', 0, NULL,
+('FIANARANTS', CURDATE(), 0, NULL,
     (SELECT numBat FROM mbatiment ORDER BY numBat LIMIT 1 OFFSET 2),
     (SELECT codeCli FROM locataire ORDER BY codeCli LIMIT 1 OFFSET 0));
 
